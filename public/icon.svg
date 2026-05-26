@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#dc2626"/>
+  <text x="256" y="200" font-family="Arial" font-size="120" font-weight="bold" fill="white" text-anchor="middle">DT</text>
+  <text x="256" y="330" font-family="Arial" font-size="60" fill="white" text-anchor="middle" opacity="0.8">Diabete</text>
+  <text x="256" y="400" font-family="Arial" font-size="50" fill="white" text-anchor="middle" opacity="0.6">Tracker</text>
+</svg>
