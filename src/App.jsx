@@ -371,7 +371,7 @@ function CorrectifBlock({entries,onAdd,onDelete,cfg}){
   const [note,setNote]=useState("");
   const TYPES=[{id:"bolus",label:"Bolus correctif",color:C.red,icon:"Bolus"},{id:"resucrage",label:"Resucrage",color:C.orange,icon:"Sucre"},{id:"extra",label:"Extra/collation",color:C.purple,icon:"Extra"}];
   const typeDef=TYPES.find(function(t){return t.id===type;})||TYPES[0];
-  const corrSug=gly&&cfg?(function(){var n=parseFloat(gly);if(isNaN(n)||n<=cfg.ciblePre)return null;return ((n-cfg.ciblePre)/cfg.fc).toFixed(1);})():null;
+  const corrSug=gly&&cfg?(parseFloat(gly)>cfg.ciblePre?((parseFloat(gly)-cfg.ciblePre)/cfg.fc).toFixed(1):null):null;
   const add=()=>{ if(!time)return; if(type==="bolus"&&!units)return; if((type==="resucrage"||type==="extra")&&!glucides)return; onAdd({id:Date.now()+"",type,time,gly,units,glucides,note}); setGly("");setUnits("");setGlucides("");setNote(""); };
   const sorted=[].concat(entries).sort(function(a,b){return a.time.localeCompare(b.time);});
   return(<div style={{borderRadius:14,border:"1.5px solid "+(entries.length>0?C.red:C.border),background:entries.length>0?"#fff5f5":"white",marginBottom:10}}>
@@ -743,6 +743,17 @@ function buildReport(allData,from,to){
   return "<!DOCTYPE html><html lang='fr'><head><meta charset='UTF-8'><title>Rapport</title><style>"+css+"</style></head><body>"+body+"</body></html>";
 }
 
+function CurveStats({pts,cfg}){
+  var vals=pts.map(function(p){return parseFloat(p.value);});
+  var avg=(vals.reduce(function(s,v){return s+v;},0)/vals.length).toFixed(2);
+  var tir=Math.round(vals.filter(function(v){return v>=(cfg||DEF).tMin&&v<=(cfg||DEF).tMax;}).length/vals.length*100);
+  var above=Math.round(vals.filter(function(v){return v>(cfg||DEF).tMax;}).length/vals.length*100);
+  var items=[["Moyenne",avg+" g/L",C.blue],["Temps cible",tir+"%",tir>=70?C.green:C.orange],["Au-dessus",above+"%",above>20?C.red:C.green]];
+  return(<div style={{display:"flex",gap:8,marginTop:8}}>
+    {items.map(function(item){return <div key={item[0]} style={{flex:1,textAlign:"center",background:item[2]+"11",borderRadius:8,padding:"5px 4px"}}><div style={{fontSize:10,color:C.muted}}>{item[0]}</div><div style={{fontSize:13,fontWeight:700,color:item[2]}}>{item[1]}</div></div>;}  )}
+  </div>);
+}
+
 export default function App(){
   const [allData,saveAll,ready]=useStorage();
   const [activeDay,setActiveDay]=useState(TODAY());
@@ -785,9 +796,7 @@ export default function App(){
       {day.dexcomCurve&&day.dexcomCurve.length>0?(<div style={{background:"white",border:"1.5px solid #93c5fd",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontWeight:700,fontSize:13,color:C.blue}}>Courbe Dexcom</span><span style={{fontSize:11,color:C.muted}}>{day.dexcomCurve.length+" pts"}</span></div>
         <DayCurve pts={day.dexcomCurve} insulins={[]} meals={day.meals} cfg={cfg} width={340} height={110}/>
-        {(function(){var vals=day.dexcomCurve.map(function(p){return parseFloat(p.value);});var avg=(vals.reduce(function(s,v){return s+v;},0)/vals.length).toFixed(2);var tir=Math.round(vals.filter(function(v){return v>=cfg.tMin&&v<=cfg.tMax;}).length/vals.length*100);var above=Math.round(vals.filter(function(v){return v>cfg.tMax;}).length/vals.length*100);
-          return(<div style={{display:"flex",gap:8,marginTop:8}}>{[["Moyenne",avg+" g/L",C.blue],["Temps cible",tir+"%",tir>=70?C.green:C.orange],["Au-dessus",above+"%",above>20?C.red:C.green]].map(function(item){return <div key={item[0]} style={{flex:1,textAlign:"center",background:item[2]+"11",borderRadius:8,padding:"5px 4px"}}><div style={{fontSize:10,color:C.muted}}>{item[0]}</div><div style={{fontSize:13,fontWeight:700,color:item[2]}}>{item[1]}</div></div>;})}</div>);
-        })()}
+        <CurveStats pts={day.dexcomCurve} cfg={cfg}/>
       </div>):(<div style={{background:"#eff6ff",border:"1.5px dashed #93c5fd",borderRadius:12,padding:"14px 16px",marginBottom:12,textAlign:"center"}}><div style={{fontSize:13,color:C.blue,fontWeight:600}}>Aucune courbe Dexcom - importez le CSV</div></div>)}
       <AdaptiveBanner allData={allData} cfg={cfg} onApply={function(nc){saveAll(Object.assign({},allData,{cfg:nc}));}}/>
       <ConfigPanel cfg={cfg} onSave={function(c){saveAll(Object.assign({},allData,{cfg:c}));}} allData={allData}/>
