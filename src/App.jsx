@@ -1,37 +1,28 @@
 import { useState, useEffect, useRef } from "react";
 
 const SK = "diabete-v5";
-const VERSION = "v2.2";
-const DEF = {
-  tMin: 0.9,
-  tMax: 1.8,
-  ratioIC: 10,
-  fc: 0.5,
-  ciblePre: 1.2,
-  lenteHab: "",
-  lenteHeure: "22:00",
-  lenteNom: "",
-  anthropicKey: ""
-};
+const VERSION = "v2.2.2-api-key";
+const DEF = { tMin:0.9, tMax:1.8, ratioIC:10, fc:0.5, ciblePre:1.2, lenteHab:"", lenteHeure:"22:00", lenteNom:"", anthropicKey:"" };
 const MEALS = [
   { id:"breakfast", label:"Petit-dejeuner", tag:"Matin", color:"#d97706" },
   { id:"lunch",     label:"Dejeuner",       tag:"Midi",  color:"#16a34a" },
   { id:"dinner",    label:"Diner",           tag:"Soir",  color:"#0284c7" },
 ];
 const C = { bg:"#f7f3ef", card:"#fff", border:"#e8e0d8", text:"#2d2416", muted:"#8b7355", red:"#dc2626", green:"#16a34a", orange:"#d97706", blue:"#0284c7", purple:"#7c3aed" };
-const HDRS = { "Content-Type":"application/json", "anthropic-dangerous-direct-browser-access":"true" };
+function getAIHeaders(apiKey) {
+  const key = (apiKey || "").trim();
+  if (!key) throw new Error("Cle API Claude manquante. Renseignez-la dans les parametres.");
+  return {
+    "Content-Type":"application/json",
+    "anthropic-version":"2023-06-01",
+    "x-api-key":key,
+    "anthropic-dangerous-direct-browser-access":"true"
+  };
+}
 
 function useStorage() {
-  const CURRENT_KEY = "diabete-v5";
-  const LEGACY_KEYS = [
-    "diabete",
-    "diabete-v1",
-    "diabete-v2",
-    "diabete-v3",
-    "diabete-v4",
-    "diabete-v5"
-  ];
-
+  const CURRENT_KEY = SK;
+  const LEGACY_KEYS = ["diabete", "diabete-v1", "diabete-v2", "diabete-v3", "diabete-v4", "diabete-v5"];
   const [data, setData] = useState(null);
   const [ready, setReady] = useState(false);
 
@@ -40,50 +31,42 @@ function useStorage() {
     try {
       const parsed = typeof value === "string" ? JSON.parse(value) : value;
       if (parsed && typeof parsed === "object") return parsed;
-    } catch (e) {}
+    } catch(e) {}
     return null;
   }
 
   function scoreBackup(obj) {
     if (!obj || typeof obj !== "object") return -1;
-    const daysCount = obj.days && typeof obj.days === "object"
-      ? Object.keys(obj.days).length
-      : 0;
-
+    const daysCount = obj.days && typeof obj.days === "object" ? Object.keys(obj.days).length : 0;
+    const mealsCount = obj.days && typeof obj.days === "object" ? Object.values(obj.days).reduce(function(total, day) {
+      return total + (day && day.meals && typeof day.meals === "object" ? Object.keys(day.meals).length : 0);
+    }, 0) : 0;
+    const curveCount = obj.days && typeof obj.days === "object" ? Object.values(obj.days).reduce(function(total, day) {
+      return total + (day && Array.isArray(day.dexcomCurve) ? day.dexcomCurve.length : 0);
+    }, 0) : 0;
     const hasCfg = obj.cfg ? 1 : 0;
-    return daysCount * 100 + hasCfg;
+    return daysCount * 100000 + mealsCount * 1000 + curveCount + hasCfg;
   }
 
   useEffect(() => {
     (async () => {
       let candidates = [];
 
-      // 1. Recherche dans localStorage Safari / navigateur
       try {
         const allLocalKeys = Object.keys(localStorage || {});
-        const interestingKeys = allLocalKeys.filter(k =>
-          /diab|dexcom|glucose|tracker/i.test(k)
-        );
-
-        const keysToTry = [...new Set([...LEGACY_KEYS, ...interestingKeys])];
-
-        keysToTry.forEach(key => {
+        const interestingKeys = allLocalKeys.filter(function(k) { return /diab|dexcom|glucose|tracker/i.test(k); });
+        const keysToTry = Array.from(new Set(LEGACY_KEYS.concat(interestingKeys)));
+        keysToTry.forEach(function(key) {
           const raw = localStorage.getItem(key);
           const parsed = safeParse(raw);
           if (parsed && (parsed.days || parsed.cfg)) {
-            candidates.push({
-              source: "localStorage",
-              key,
-              data: parsed,
-              score: scoreBackup(parsed)
-            });
+            candidates.push({ source:"localStorage", key:key, data:parsed, score:scoreBackup(parsed) });
           }
         });
-      } catch (e) {
+      } catch(e) {
         console.warn("Lecture localStorage impossible", e);
       }
 
-      // 2. Recherche dans window.storage si disponible
       try {
         if (window.storage && typeof window.storage.get === "function") {
           for (const key of LEGACY_KEYS) {
@@ -91,55 +74,29 @@ function useStorage() {
               const r = await window.storage.get(key);
               const parsed = safeParse(r && r.value);
               if (parsed && (parsed.days || parsed.cfg)) {
-                candidates.push({
-                  source: "window.storage",
-                  key,
-                  data: parsed,
-                  score: scoreBackup(parsed)
-                });
+                candidates.push({ source:"window.storage", key:key, data:parsed, score:scoreBackup(parsed) });
               }
-            } catch (e) {}
+            } catch(e) {}
           }
         }
-      } catch (e) {
+      } catch(e) {
         console.warn("Lecture window.storage impossible", e);
       }
 
-      // 3. On garde la sauvegarde qui contient le plus de données
-      candidates.sort((a, b) => b.score - a.score);
+      candidates.sort(function(a,b) { return b.score - a.score; });
+      let restored = candidates.length > 0 ? candidates[0].data : { days:{}, cfg:DEF };
+      restored = { ...restored, days:restored.days || {}, cfg:{ ...DEF, ...(restored.cfg || {}) } };
 
-      let restored = candidates.length > 0
-        ? candidates[0].data
-        : { days: {}, cfg: DEF };
-
-      // 4. Sécurisation : on complète la config si besoin
-      restored = {
-        days: restored.days || {},
-        cfg: { ...DEF, ...(restored.cfg || {}) },
-        ...restored
-      };
-
-      // 5. Migration vers la clé actuelle, sans supprimer les anciennes
-      try {
-        localStorage.setItem(CURRENT_KEY, JSON.stringify(restored));
-      } catch (e) {
-        console.warn("Migration localStorage impossible", e);
-      }
-
+      try { localStorage.setItem(CURRENT_KEY, JSON.stringify(restored)); } catch(e) { console.warn("Migration localStorage impossible", e); }
       try {
         if (window.storage && typeof window.storage.set === "function") {
           await window.storage.set(CURRENT_KEY, JSON.stringify(restored));
         }
-      } catch (e) {
-        console.warn("Migration window.storage impossible", e);
-      }
+      } catch(e) { console.warn("Migration window.storage impossible", e); }
 
-      console.log("Sauvegardes trouvées :", candidates.map(c => ({
-        source: c.source,
-        key: c.key,
-        jours: c.data.days ? Object.keys(c.data.days).length : 0,
-        score: c.score
-      })));
+      console.log("Sauvegardes trouvees :", candidates.map(function(c) {
+        return { source:c.source, key:c.key, jours:c.data.days ? Object.keys(c.data.days).length : 0, score:c.score };
+      }));
 
       setData(restored);
       setReady(true);
@@ -147,30 +104,17 @@ function useStorage() {
   }, []);
 
   const save = async (d) => {
-    const safeData = {
-      days: d.days || {},
-      cfg: { ...DEF, ...(d.cfg || {}) },
-      ...d
-    };
-
+    const safeData = { ...d, days:d.days || {}, cfg:{ ...DEF, ...(d.cfg || {}) } };
     setData(safeData);
-
-    try {
-      localStorage.setItem(CURRENT_KEY, JSON.stringify(safeData));
-    } catch (e) {
-      console.error("Erreur sauvegarde localStorage", e);
-    }
-
+    try { localStorage.setItem(CURRENT_KEY, JSON.stringify(safeData)); } catch(e) { console.error("Erreur sauvegarde localStorage", e); }
     try {
       if (window.storage && typeof window.storage.set === "function") {
         await window.storage.set(CURRENT_KEY, JSON.stringify(safeData));
       }
-    } catch (e) {
-      console.warn("Erreur sauvegarde window.storage", e);
-    }
+    } catch(e) { console.warn("Erreur sauvegarde window.storage", e); }
   };
 
-  return [data || { days: {}, cfg: DEF }, save, ready];
+  return [data || { days:{}, cfg:DEF }, save, ready];
 }
 
 const toISO = (d) => d.toISOString().split("T")[0];
@@ -206,11 +150,11 @@ function parseJSON(txt) {
   } catch(_) { return {resume:"Erreur. Relancez.",observations:[],recommandations:[],score_equilibre:5,conseils_dosage:[]}; }
 }
 
-async function aiGlucides(desc) {
+async function aiGlucides(desc,cfg) {
   var prompt="Tu es un dieteticien expert. Estime les glucides de ce repas: "+desc
     +"\nReponds UNIQUEMENT avec un JSON valide: {total:number,confidence:string,items:[{name:string,glucides:number}],conseil:string}";
   var res;
-  try { res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:HDRS,
+  try { res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getAIHeaders(cfg && cfg.anthropicKey),
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
       messages:[{role:"user",content:prompt}]})}); }
   catch(e){throw new Error("Connexion impossible: "+e.message);}
@@ -249,7 +193,7 @@ async function aiAnalyse(dayCtx,cfg) {
   }
   var instr="\n=== MISSION ===\nDiabetologue expert. JSON brut valide uniquement.\nChamps: resume, score_equilibre(1-10), analyse_doses:[{repas,dose_injectee,dose_ideale,ecart,explication}], adaptation_ratios:{ratioIC_actuel,ratioIC_suggere,fc_actuel,fc_suggere,explication}, analyse_nocturne:{bilan,suggestion_lente,risque_hypo_nuit}, recommandations:[string]";
   var res;
-  try{res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:HDRS,
+  try{res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getAIHeaders(cfg && cfg.anthropicKey),
     body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
       messages:[{role:"user",content:lines.join("\n")+instr}]})});}
   catch(e){throw new Error("Connexion impossible: "+e.message);}
@@ -403,14 +347,14 @@ function DayCurve({pts,insulins,meals,cfg,width,height}){
   </svg>);
 }
 
-function GlucidesAI({initDesc,onAccept,photo}){
+function GlucidesAI({initDesc,onAccept,photo,cfg}){
   const [desc,setDesc]=useState(initDesc||"");
   const [res,setRes]=useState(null);
   const [aiRes,setAiRes]=useState(null);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState(null);
   const estimate=()=>{ if(!desc.trim())return; setErr(null); setAiRes(null); const r=estimateCarbsLocal(desc); if(!r.found){setRes({total:0,items:[],found:false});setErr("Aucun aliment reconnu. Essayez: pain, pates, riz, pomme...");return;} setRes(r); };
-  const enhance=async()=>{ setLoading(true);setErr(null); try{setAiRes(await aiGlucides(desc));}catch(e){setErr("IA indisponible ("+e.message+"). Estimation locale valable.");}finally{setLoading(false);} };
+  const enhance=async()=>{ setLoading(true);setErr(null); try{setAiRes(await aiGlucides(desc,cfg));}catch(e){setErr("IA indisponible ("+e.message+"). Estimation locale valable.");}finally{setLoading(false);} };
   const active=aiRes||res;
   return(<div style={{background:"#fff7ed",border:"1.5px solid "+C.orange,borderRadius:12,padding:16,marginTop:10}}>
     <div style={{fontWeight:700,color:C.orange,fontSize:13,marginBottom:8}}>Estimation des glucides</div>
@@ -479,7 +423,7 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve}){
         <div><Lbl>Glucides (g)</Lbl><TInput type="number" value={glucides} onChange={setGlucides} placeholder="0" min="0"/></div>
         <button onClick={()=>setShowAI(!showAI)} style={{padding:"9px 10px",background:showAI?"#fff7ed":"white",color:C.orange,border:"1.5px solid "+C.orange,borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",width:"100%"}}>IA</button>
       </div>
-      {showAI&&<GlucidesAI initDesc={desc} onAccept={v=>{setGlucides(String(v));setShowAI(false);}} photo={photo}/>}
+      {showAI&&<GlucidesAI initDesc={desc} cfg={cfg} onAccept={v=>{setGlucides(String(v));setShowAI(false);}} photo={photo}/>}
       {s&&(<div style={{background:"#fef2f2",border:"1.5px solid #fca5a5",borderRadius:10,padding:"12px 14px",marginTop:12}}>
         <div style={{fontWeight:700,color:C.red,fontSize:12,marginBottom:8,textTransform:"uppercase"}}>Dose suggeree</div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:8}}>
@@ -563,9 +507,10 @@ function ConfigPanel({cfg,onSave,allData}){
   const [lente,setLente]=useState(String(cfg.lenteHab||""));
   const [lenteH,setLenteH]=useState(String(cfg.lenteHeure||"22:00"));
   const [lenteN,setLenteN]=useState(String(cfg.lenteNom||""));
+  const [anthropicKey,setAnthropicKey]=useState(String(cfg.anthropicKey||""));
   const [rcResult,setRcResult]=useState(null);
   const [rcLoading,setRcLoading]=useState(false);
-  const save=()=>{onSave({tMin:parseFloat(tMin)||0.9,tMax:parseFloat(tMax)||1.8,ratioIC:parseFloat(ratio)||10,fc:parseFloat(fc)||0.5,ciblePre:parseFloat(cible)||1.2,lenteHab:lente,lenteHeure:lenteH,lenteNom:lenteN});setOpen(false);};
+  const save=()=>{onSave({tMin:parseFloat(tMin)||0.9,tMax:parseFloat(tMax)||1.8,ratioIC:parseFloat(ratio)||10,fc:parseFloat(fc)||0.5,ciblePre:parseFloat(cible)||1.2,lenteHab:lente,lenteHeure:lenteH,lenteNom:lenteN,anthropicKey:anthropicKey});setOpen(false);};
   const recalc=async()=>{
     setRcLoading(true);setRcResult(null);
     var pts=[];
@@ -586,7 +531,7 @@ function ConfigPanel({cfg,onSave,allData}){
     if(pts.length<3){setRcResult({ok:false,msg:"Pas assez de donnees ("+pts.length+" repas avec Dexcom). Minimum 3."});setRcLoading(false);return;}
     try{
       var prompt="Donnees repas:\n"+pts.map(function(p){return p.d+" "+p.r+": glucides="+p.g+"g gly_pre="+p.gp+"g/L dose="+p.di+"UI gly_post="+p.gpost.toFixed(2)+"g/L";}).join("\n")+"\nParams actuels: ratioIC="+ratio+", fc="+fc+"\nJSON uniquement: {ratioIC:number,fc:number,note:string,fiabilite:string}";
-      var res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:HDRS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+      var res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getAIHeaders(anthropicKey),body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
       var d=await res.json();
       var r=parseJSON(((d.content&&d.content.find(function(c){return c.type==="text";}))||{}).text||"{}");
       if(r.ratioIC)setRcResult({...r,ok:true,count:pts.length});
@@ -629,6 +574,13 @@ function ConfigPanel({cfg,onSave,allData}){
         </div>
         <div style={{fontSize:11,color:C.muted}}>Confirmee chaque jour, modifiable si besoin.</div>
       </div>
+      <div style={{marginBottom:12,background:"#f8fafc",border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px"}}>
+        <div style={{fontWeight:700,color:C.text,fontSize:12,marginBottom:10,textTransform:"uppercase"}}>IA Claude</div>
+        <Lbl>Cle API Anthropic / Claude</Lbl>
+        <input type="password" value={anthropicKey} onChange={e=>setAnthropicKey(e.target.value)} placeholder="sk-ant-..." autoComplete="off" style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,color:C.text,fontFamily:"inherit",outline:"none",boxSizing:"border-box",background:"white"}}/>
+        <div style={{fontSize:11,color:C.muted,marginTop:6}}>Cette cle reste stockee localement dans le navigateur. Elle est utilisee uniquement pour appeler l API Claude depuis cet appareil.</div>
+      </div>
+
       <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12}}>
         <strong style={{color:C.green}}>Exemple: </strong>{"repas "+exG+"g, glyc. "+exGp.toFixed(1)+" g/L -> "+exBR+" UI + "+exBC+" UI = "+(parseFloat(exBR)+parseFloat(exBC)).toFixed(1)+" UI"}
       </div>
@@ -763,7 +715,7 @@ function AnalysePanel({dayData,dayLabel,cfg}){
         {result.adaptation_ratios&&(<div style={{background:"#fff7ed",border:"2px solid "+C.orange,borderRadius:12,padding:"12px 14px",marginBottom:10}}>
           <div style={{fontWeight:700,color:C.orange,fontSize:12,textTransform:"uppercase",marginBottom:8}}>Adaptation des ratios</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-            {[["Ratio IC",cfg.ratioIC+"g/UI",result.adaptation_ratios.ratioIC_suggere+"g/UI"],["FC",cfg.fc+" g/L",result.adaptation_ratios.fc_suggere+" g/L"]].map(function(item){return <div key={item[0]} style={{background:"white",borderRadius:8,padding:"8px 10px"}}><div style={{fontSize:10,color:C.muted,marginBottom:4}}>{item[0]}</div><div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:C.muted}}>{item[1]}</span><span style={{fontSize:12,color:C.orange}}>-></span><span style={{fontSize:13,fontWeight:800,color:C.orange}}>{item[2]}</span></div></div>;})}
+            {[["Ratio IC",cfg.ratioIC+"g/UI",result.adaptation_ratios.ratioIC_suggere+"g/UI"],["FC",cfg.fc+" g/L",result.adaptation_ratios.fc_suggere+" g/L"]].map(function(item){return <div key={item[0]} style={{background:"white",borderRadius:8,padding:"8px 10px"}}><div style={{fontSize:10,color:C.muted,marginBottom:4}}>{item[0]}</div><div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:C.muted}}>{item[1]}</span><span style={{fontSize:12,color:C.orange}}>{"->"}</span><span style={{fontSize:13,fontWeight:800,color:C.orange}}>{item[2]}</span></div></div>;})}
           </div>
           {result.adaptation_ratios.explication&&<p style={{fontSize:12,color:C.orange,margin:0}}>{result.adaptation_ratios.explication}</p>}
         </div>)}
@@ -847,7 +799,7 @@ function AdaptiveBanner({allData,cfg,onApply}){
     <p style={{fontSize:11,color:C.muted,marginBottom:10}}>{"Analyse sur "+suggestion.points+" repas - "+suggestion.pctInTarget+"% post-prandiaux dans la cible."}</p>
     <div style={{background:"white",borderRadius:8,padding:"8px 10px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted}}>Actuel</div><div style={{fontWeight:700,fontSize:14}}>{cfg.ratioIC+"g/UI"}</div></div>
-      <span style={{color:C.orange,fontSize:16}}>-></span>
+      <span style={{color:C.orange,fontSize:16}}>{"->"}</span>
       <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted}}>Suggere</div><div style={{fontWeight:800,fontSize:14,color:C.orange}}>{suggestion.ratioIC+"g/UI"}</div></div>
     </div>
     <div style={{display:"flex",gap:8}}>
