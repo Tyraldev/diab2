@@ -30,7 +30,6 @@ const MEALS = [
   { id:"breakfast", label:"Petit-dejeuner", tag:"Matin", color:"#d97706" },
   { id:"lunch",     label:"Dejeuner",        tag:"Midi",  color:"#16a34a" },
   { id:"dinner",    label:"Diner",            tag:"Soir",  color:"#0284c7" },
-  { id:"extra",     label:"Extra",            tag:"Extra", color:"#7c3aed" },
 ];
 
 const C = {
@@ -583,42 +582,6 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}){
   </div>);
 }
 
-function LentePanel({entries,onAdd,onDelete}){
-  const [open,setOpen]=useState(false);
-  const [units,setUnits]=useState("");
-  const [time,setTime]=useState(nowTime());
-  const [note,setNote]=useState("");
-  const tot=entries.reduce((s,e)=>s+(parseFloat(e.units)||0),0);
-  return(<div style={{borderRadius:14,border:"1.5px solid #93c5fd",background:"#eff6ff",marginBottom:10}}>
-    <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <span style={{background:C.blue,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>Lente</span>
-        <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Insuline lente</div>
-          <div style={{fontSize:12,color:C.muted}}>{entries.length===0?"Aucune injection":"Total: "+tot+" UI"}</div>
-        </div>
-      </div>
-      <div style={{display:"flex",gap:6,alignItems:"center"}}>
-        {tot>0&&<Pill color={C.blue}>{tot+" UI"}</Pill>}
-        <span style={{color:C.muted}}>{open?"^":"v"}</span>
-      </div>
-    </div>
-    {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #bfdbfe"}}>
-      {entries.map(e=>(<div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"white",borderRadius:8,marginBottom:6,border:"1px solid "+C.border}}>
-        <span style={{fontSize:13}}>{e.time+" - "}<strong>{e.units+" UI"}</strong>{e.note?" - "+e.note:""}</span>
-        <button onClick={()=>onDelete(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:16}}>x</button>
-      </div>))}
-      <div style={{background:"white",borderRadius:10,padding:14,border:"1px solid "+C.border}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-          <div><Lbl>Unites (UI)</Lbl><TInput type="number" value={units} onChange={setUnits} min="0" step="0.5" placeholder="0"/></div>
-          <div><Lbl>Heure</Lbl><TTime value={time} onChange={setTime}/></div>
-        </div>
-        <div style={{marginBottom:10}}><Lbl>Note</Lbl><TInput value={note} onChange={setNote} placeholder="Site, moment..."/></div>
-        <PBtn onClick={()=>{if(!units)return;onAdd({id:Date.now()+"",type:"lente",units,time,note});setUnits("");setNote("");}} disabled={!units} color={C.blue} full>Ajouter</PBtn>
-      </div>
-    </div>)}
-  </div>);
-}
-
 function ConfigPanel({cfg,onSave,allData}){
   const [open,setOpen]=useState(false);
   const [tMin,setTMin]=useState(String(cfg.tMin));
@@ -627,10 +590,12 @@ function ConfigPanel({cfg,onSave,allData}){
   const [fc,setFc]=useState(String(cfg.fc));
   const [cible,setCible]=useState(String(cfg.ciblePre));
   const [lente,setLente]=useState(String(cfg.lenteHab||""));
+  const [lenteHeure,setLenteHeure]=useState(String(cfg.lenteHeure||"22:00"));
+  const [lenteNom,setLenteNom]=useState(String(cfg.lenteNom||""));
   const [apiKeyInput,setApiKeyInput]=useState(String(cfg.apiKey||""));
   const [rcResult,setRcResult]=useState(null);
   const [rcLoading,setRcLoading]=useState(false);
-  const save=()=>{onSave({tMin:parseFloat(tMin)||0.9,tMax:parseFloat(tMax)||1.8,ratioIC:parseFloat(ratio)||10,fc:parseFloat(fc)||0.5,ciblePre:parseFloat(cible)||1.2,lenteHab:lente,apiKey:apiKeyInput});setOpen(false);};
+  const save=()=>{onSave({tMin:parseFloat(tMin)||0.9,tMax:parseFloat(tMax)||1.8,ratioIC:parseFloat(ratio)||10,fc:parseFloat(fc)||0.5,ciblePre:parseFloat(cible)||1.2,lenteHab:lente,lenteHeure,lenteNom,apiKey:apiKeyInput});setOpen(false);};
   const recalc=async()=>{
     setRcLoading(true);setRcResult(null);
     const pts=[];
@@ -694,7 +659,16 @@ function ConfigPanel({cfg,onSave,allData}){
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <div><Lbl>Cible pre-repas (g/L)</Lbl><TInput type="number" value={cible} onChange={setCible} placeholder="1.2" step="0.1"/></div>
-          <div><Lbl>Insuline lente habituelle (UI)</Lbl><TInput type="number" value={lente} onChange={setLente} placeholder="ex: 20" step="1"/></div>
+          <div></div>
+        </div>
+        <div style={{marginTop:12,background:"#eff6ff",borderRadius:10,padding:"12px 14px"}}>
+          <div style={{fontWeight:700,color:C.blue,fontSize:12,marginBottom:10,textTransform:"uppercase"}}>Insuline lente - dose fixe quotidienne</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:6}}>
+            <div><Lbl>Dose (UI)</Lbl><TInput type="number" value={lente} onChange={setLente} placeholder="ex: 20" step="0.5"/></div>
+            <div><Lbl>Heure habituelle</Lbl><TTime value={lenteHeure} onChange={setLenteHeure}/></div>
+            <div><Lbl>Nom (ex: Lantus)</Lbl><TInput value={lenteNom} onChange={setLenteNom} placeholder="Lantus..."/></div>
+          </div>
+          <div style={{fontSize:11,color:C.muted}}>Pre-remplie chaque jour. Modifiez seulement si votre dose change.</div>
         </div>
         <div style={{marginTop:12}}>
           <Lbl>Cle API Anthropic (optionnel, pour l IA)</Lbl>
@@ -788,6 +762,7 @@ function ClarityImporter({allData,saveAll}){
 //    LOCAL DAY ANALYSIS (no AI needed)                                         
 function analyseLocal(dayData, cfg) {
   const curve = dayData.dexcomCurve || [];
+  const correctifs = dayData.correctifs || [];
   const meals = dayData.meals || {};
   const insulins = dayData.insulins || [];
   const obs = [];
@@ -1249,6 +1224,166 @@ function AdaptiveBanner({ allData, cfg, onApply }) {
 
 
 
+
+//    EXPORT / IMPORT JSON                                                       
+
+function CorrectifBlock({ entries, onAdd, onDelete, cfg }) {
+  const [open, setOpen] = useState(false);
+  const [type, setType] = useState("bolus");
+  const [time, setTime] = useState(nowTime());
+  const [gly, setGly] = useState("");
+  const [units, setUnits] = useState("");
+  const [glucides, setGlucides] = useState("");
+  const [note, setNote] = useState("");
+  const TYPES = [
+    { id:"bolus",     label:"Bolus correctif",  color:C.red,    icon:"Bolus" },
+    { id:"resucrage", label:"Resucrage",         color:C.orange, icon:"Sucre" },
+    { id:"extra",     label:"Extra / collation", color:C.purple, icon:"Extra" },
+  ];
+  const typeDef = TYPES.find(t => t.id === type) || TYPES[0];
+  const corrSuggested = (() => {
+    if (!gly || !cfg) return null;
+    const n = parseFloat(gly);
+    if (isNaN(n) || n <= cfg.ciblePre) return null;
+    return ((n - cfg.ciblePre) / cfg.fc).toFixed(1);
+  })();
+  const add = () => {
+    if (!time) return;
+    if (type === "bolus" && !units) return;
+    if ((type === "resucrage" || type === "extra") && !glucides) return;
+    onAdd({ id:Date.now()+"", type, time, gly, units, glucides, note });
+    setGly(""); setUnits(""); setGlucides(""); setNote("");
+    // Stay open so user can add another
+  };
+  const sorted = [...entries].sort((a,b) => a.time.localeCompare(b.time));
+  return (
+    <div style={{borderRadius:14,border:"1.5px solid "+(entries.length>0?C.red:C.border),background:entries.length>0?"#fff5f5":"white",marginBottom:10}}>
+      <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{background:C.red,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>+/-</span>
+          <div>
+            <div style={{fontWeight:700,color:C.text,fontSize:15}}>Correctifs / Extra</div>
+            <div style={{fontSize:12,color:C.muted}}>{entries.length===0?"Bolus correctifs, resucrage, extras":entries.length+" evenement"+(entries.length>1?"s":"")}</div>
+          </div>
+        </div>
+        <span style={{color:C.muted}}>{open?"^":"v"}</span>
+      </div>
+      {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #fee2e2"}}>
+        {sorted.map(e=>{
+          const td=TYPES.find(t=>t.id===e.type)||TYPES[0];
+          return(<div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"white",borderRadius:8,marginBottom:6,border:"1px solid "+td.color+"44"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{background:td.color,color:"white",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{td.icon}</span>
+              <div>
+                <span style={{fontSize:13,fontWeight:600}}>{e.time}</span>
+                {e.gly&&<span style={{marginLeft:6,fontSize:12,color:glyColor(e.gly,cfg),fontWeight:700}}>{"glyc. "+e.gly+" g/L"}</span>}
+                {e.units&&<span style={{marginLeft:6,fontSize:12,color:C.red,fontWeight:700}}>{e.units+" UI"}</span>}
+                {e.glucides&&<span style={{marginLeft:6,fontSize:12,color:C.orange,fontWeight:700}}>{e.glucides+"g"}</span>}
+                {e.note&&<span style={{marginLeft:6,fontSize:11,color:C.muted}}>{e.note}</span>}
+              </div>
+            </div>
+            <button onClick={()=>onDelete(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:16}}>x</button>
+          </div>);
+        })}
+        <div style={{background:"white",borderRadius:10,padding:14,border:"1px solid "+C.border,marginTop:6}}>
+          <div style={{display:"flex",gap:6,marginBottom:12}}>
+            {TYPES.map(t=>(<button key={t.id} onClick={()=>setType(t.id)} style={{flex:1,padding:"7px 4px",border:"2px solid "+(type===t.id?t.color:C.border),borderRadius:8,background:type===t.id?t.color:"transparent",color:type===t.id?"white":C.muted,cursor:"pointer",fontWeight:700,fontSize:11,fontFamily:"inherit"}}>{t.label}</button>))}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"100px 1fr",gap:10,marginBottom:10}}>
+            <div><Lbl>Heure</Lbl><TTime value={time} onChange={setTime}/></div>
+            <div><Lbl>Glycemie (g/L)</Lbl><TInput type="number" value={gly} onChange={setGly} placeholder="ex: 2.10" min="0" step="0.01"/></div>
+          </div>
+          {gly&&(<div style={{padding:"8px 12px",background:glyColor(gly,cfg)+"11",border:"1px solid "+glyColor(gly,cfg),borderRadius:8,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:12,color:glyColor(gly,cfg),fontWeight:700}}>{glyLabel(gly,cfg)}</span>
+            {corrSuggested&&type==="bolus"&&(<span style={{fontSize:12,color:C.red}}>{"Correction suggeree: "}<strong>{corrSuggested+" UI"}</strong><button onClick={()=>setUnits(corrSuggested)} style={{marginLeft:8,padding:"2px 8px",background:C.red,color:"white",border:"none",borderRadius:6,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Utiliser</button></span>)}
+            {type==="resucrage"&&gly&&parseFloat(gly)<cfg.tMin&&(<span style={{fontSize:12,color:C.orange}}>Regle des 15g : 3 sucres ou 1 jus de fruit</span>)}
+          </div>)}
+          {type==="bolus"&&(<div style={{marginBottom:10}}><Lbl>Dose injectee (UI)</Lbl><TInput type="number" value={units} onChange={setUnits} placeholder="ex: 4" min="0" step="0.5"/></div>)}
+          {(type==="resucrage"||type==="extra")&&(<div style={{marginBottom:10}}><Lbl>{type==="resucrage"?"Glucides ingeres (g)":"Glucides (g)"}</Lbl><TInput type="number" value={glucides} onChange={setGlucides} placeholder={type==="resucrage"?"ex: 15 (3 sucres)":"ex: 20"} min="0" step="1"/></div>)}
+          <div style={{marginBottom:10}}><Lbl>Note</Lbl><TInput value={note} onChange={setNote} placeholder="Ex: reveil 3h30 en hyper..."/></div>
+          <PBtn onClick={add} disabled={type==="bolus"?!units:!glucides} color={typeDef.color} full>{"Ajouter "+typeDef.label}</PBtn>
+        </div>
+      </div>)}
+    </div>
+  );
+}
+
+function ExportImport({ allData, saveAll }) {
+  const [importing, setImporting] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const ref = useRef();
+
+  const doExport = () => {
+    const json = JSON.stringify(allData, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "diabetetracker-" + toISO(new Date()) + ".json";
+    a.click();
+    URL.revokeObjectURL(url);
+    setMsg({ type: "ok", txt: "Donnees exportees ! Importez ce fichier sur votre autre appareil." });
+  };
+
+  const doImport = (file) => {
+    setImporting(true); setMsg(null);
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const imported = JSON.parse(e.target.result);
+        // Merge: keep existing days, add imported days, imported cfg wins
+        const mergedDays = { ...(allData.days || {}), ...(imported.days || {}) };
+        const merged = { ...allData, ...imported, days: mergedDays };
+        saveAll(merged);
+        const dc = Object.keys(imported.days || {}).length;
+        setMsg({ type: "ok", txt: "Import reussi ! " + dc + " jour" + (dc > 1 ? "s" : "") + " fusionnes avec vos donnees existantes." });
+      } catch(e) {
+        setMsg({ type: "err", txt: "Fichier invalide : " + e.message });
+      }
+      setImporting(false);
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div style={{ borderRadius: 14, border: "1.5px solid " + C.border, background: "white", marginBottom: 12 }}>
+      <div style={{ padding: "14px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <span style={{ background: C.muted, color: "white", borderRadius: 8, padding: "4px 10px", fontSize: 12, fontWeight: 700 }}>Sync</span>
+          <div>
+            <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>Export / Import donnees</div>
+            <div style={{ fontSize: 12, color: C.muted }}>Transferer les donnees entre PC et iPhone</div>
+          </div>
+        </div>
+        <div style={{ background: "#f0f9ff", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: C.blue }}>
+          <strong>Comment synchroniser PC et iPhone :</strong><br />
+          1. Sur PC : importez le CSV Dexcom, puis cliquez Exporter<br />
+          2. Envoyez le fichier .json sur votre iPhone (AirDrop, email, iCloud...)<br />
+          3. Sur iPhone : cliquez Importer et selectionnez le fichier<br />
+          Les donnees existantes sont conservees et fusionnees.
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <PBtn onClick={doExport} color={C.blue} full>Exporter mes donnees (.json)</PBtn>
+          <button onClick={() => ref.current.click()} disabled={importing}
+            style={{ padding: "10px 14px", background: "white", color: C.green, border: "2px solid " + C.green, borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+            {importing ? "..." : "Importer"}
+          </button>
+          <input ref={ref} type="file" accept=".json,application/json" style={{ display: "none" }}
+            onChange={e => { if (e.target.files[0]) doImport(e.target.files[0]); }} />
+        </div>
+        {msg && (
+          <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, fontSize: 13,
+            background: msg.type === "ok" ? "#f0fdf4" : "#fef2f2",
+            color: msg.type === "ok" ? C.green : C.red,
+            border: "1px solid " + (msg.type === "ok" ? "#86efac" : "#fca5a5") }}>
+            {msg.txt}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App(){
   const [allData,saveAll,ready]=useStorage();
   const [activeDay,setActiveDay]=useState(TODAY());
@@ -1320,16 +1455,18 @@ export default function App(){
         onSave={data=>upDay({meals:{...(day.meals||{}),[m.id]:data}})}
         onDelete={()=>{const ms={...(day.meals||{})};delete ms[m.id];upDay({meals:ms});}}
         cfg={cfg} curve={day.dexcomCurve||null} apiKey={apiKey}/>))}
-      <LentePanel
-        entries={(day.insulins||[]).filter(i=>i.type==="lente")}
-        onAdd={e=>upDay({insulins:[...(day.insulins||[]),e]})}
-        onDelete={id=>upDay({insulins:(day.insulins||[]).filter(x=>x.id!==id)})}
+      <CorrectifBlock
+        entries={day.correctifs||[]}
+        onAdd={e=>upDay({correctifs:[...(day.correctifs||[]),e]})}
+        onDelete={id=>upDay({correctifs:(day.correctifs||[]).filter(x=>x.id!==id)})}
+        cfg={cfg}
       />
     </div>)}
 
     {tab==="report"&&(<div style={{padding:16,paddingBottom:40}}>
       <div style={{background:"white",border:"1.5px solid "+C.border,borderRadius:14,padding:20,marginBottom:16}}>
         <h2 style={{color:C.red,margin:"0 0 16px",fontSize:16,fontWeight:800}}>Rapport medical</h2>
+        <ExportImport allData={allData} saveAll={saveAll}/>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
           <div><Lbl>Du</Lbl><input type="date" value={rFrom} onChange={e=>{setRFrom(e.target.value);setReportHtml(null);}} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,fontFamily:"inherit",color:C.text}}/></div>
           <div><Lbl>Au</Lbl><input type="date" value={rTo} onChange={e=>{setRTo(e.target.value);setReportHtml(null);}} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,fontFamily:"inherit",color:C.text}}/></div>
