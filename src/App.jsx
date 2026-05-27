@@ -12,20 +12,155 @@ const C = { bg:"#f7f3ef", card:"#fff", border:"#e8e0d8", text:"#2d2416", muted:"
 const HDRS = { "Content-Type":"application/json", "anthropic-dangerous-direct-browser-access":"true" };
 
 function useStorage() {
+  const CURRENT_KEY = "diabete-v5";
+  const LEGACY_KEYS = [
+    "diabete",
+    "diabete-v1",
+    "diabete-v2",
+    "diabete-v3",
+    "diabete-v4",
+    "diabete-v5"
+  ];
+
   const [data, setData] = useState(null);
   const [ready, setReady] = useState(false);
+
+  function safeParse(value) {
+    if (!value) return null;
+    try {
+      const parsed = typeof value === "string" ? JSON.parse(value) : value;
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch (e) {}
+    return null;
+  }
+
+  function scoreBackup(obj) {
+    if (!obj || typeof obj !== "object") return -1;
+    const daysCount = obj.days && typeof obj.days === "object"
+      ? Object.keys(obj.days).length
+      : 0;
+
+    const hasCfg = obj.cfg ? 1 : 0;
+    return daysCount * 100 + hasCfg;
+  }
+
   useEffect(() => {
     (async () => {
+      let candidates = [];
+
+      // 1. Recherche dans localStorage Safari / navigateur
       try {
-        const r = await window.storage.get(SK);
-        if (r && r.value) { try { setData(JSON.parse(r.value)); } catch(e) { setData({ days:{}, cfg:DEF }); } }
-        else setData({ days:{}, cfg:DEF });
-      } catch(e) { setData({ days:{}, cfg:DEF }); }
+        const allLocalKeys = Object.keys(localStorage || {});
+        const interestingKeys = allLocalKeys.filter(k =>
+          /diab|dexcom|glucose|tracker/i.test(k)
+        );
+
+        const keysToTry = [...new Set([...LEGACY_KEYS, ...interestingKeys])];
+
+        keysToTry.forEach(key => {
+          const raw = localStorage.getItem(key);
+          const parsed = safeParse(raw);
+          if (parsed && (parsed.days || parsed.cfg)) {
+            candidates.push({
+              source: "localStorage",
+              key,
+              data: parsed,
+              score: scoreBackup(parsed)
+            });
+          }
+        });
+      } catch (e) {
+        console.warn("Lecture localStorage impossible", e);
+      }
+
+      // 2. Recherche dans window.storage si disponible
+      try {
+        if (window.storage && typeof window.storage.get === "function") {
+          for (const key of LEGACY_KEYS) {
+            try {
+              const r = await window.storage.get(key);
+              const parsed = safeParse(r && r.value);
+              if (parsed && (parsed.days || parsed.cfg)) {
+                candidates.push({
+                  source: "window.storage",
+                  key,
+                  data: parsed,
+                  score: scoreBackup(parsed)
+                });
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {
+        console.warn("Lecture window.storage impossible", e);
+      }
+
+      // 3. On garde la sauvegarde qui contient le plus de données
+      candidates.sort((a, b) => b.score - a.score);
+
+      let restored = candidates.length > 0
+        ? candidates[0].data
+        : { days: {}, cfg: DEF };
+
+      // 4. Sécurisation : on complète la config si besoin
+      restored = {
+        days: restored.days || {},
+        cfg: { ...DEF, ...(restored.cfg || {}) },
+        ...restored
+      };
+
+      // 5. Migration vers la clé actuelle, sans supprimer les anciennes
+      try {
+        localStorage.setItem(CURRENT_KEY, JSON.stringify(restored));
+      } catch (e) {
+        console.warn("Migration localStorage impossible", e);
+      }
+
+      try {
+        if (window.storage && typeof window.storage.set === "function") {
+          await window.storage.set(CURRENT_KEY, JSON.stringify(restored));
+        }
+      } catch (e) {
+        console.warn("Migration window.storage impossible", e);
+      }
+
+      console.log("Sauvegardes trouvées :", candidates.map(c => ({
+        source: c.source,
+        key: c.key,
+        jours: c.data.days ? Object.keys(c.data.days).length : 0,
+        score: c.score
+      })));
+
+      setData(restored);
       setReady(true);
     })();
   }, []);
-  const save = async (d) => { setData(d); try { await window.storage.set(SK, JSON.stringify(d)); } catch(e) {} };
-  return [data || { days:{}, cfg:DEF }, save, ready];
+
+  const save = async (d) => {
+    const safeData = {
+      days: d.days || {},
+      cfg: { ...DEF, ...(d.cfg || {}) },
+      ...d
+    };
+
+    setData(safeData);
+
+    try {
+      localStorage.setItem(CURRENT_KEY, JSON.stringify(safeData));
+    } catch (e) {
+      console.error("Erreur sauvegarde localStorage", e);
+    }
+
+    try {
+      if (window.storage && typeof window.storage.set === "function") {
+        await window.storage.set(CURRENT_KEY, JSON.stringify(safeData));
+      }
+    } catch (e) {
+      console.warn("Erreur sauvegarde window.storage", e);
+    }
+  };
+
+  return [data || { days: {}, cfg: DEF }, save, ready];
 }
 
 const toISO = (d) => d.toISOString().split("T")[0];
