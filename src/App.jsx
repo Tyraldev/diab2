@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 
 const SK = "diabete-v5";
-const VERSION = "v2.2.2-api-key";
+const VERSION = "v2.2.3-model-fix";
 const DEF = { tMin:0.9, tMax:1.8, ratioIC:10, fc:0.5, ciblePre:1.2, lenteHab:"", lenteHeure:"22:00", lenteNom:"", anthropicKey:"" };
 const MEALS = [
   { id:"breakfast", label:"Petit-dejeuner", tag:"Matin", color:"#d97706" },
@@ -155,7 +155,7 @@ async function aiGlucides(desc,cfg) {
     +"\nReponds UNIQUEMENT avec un JSON valide: {total:number,confidence:string,items:[{name:string,glucides:number}],conseil:string}";
   var res;
   try { res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getAIHeaders(cfg && cfg.anthropicKey),
-    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
+    body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,
       messages:[{role:"user",content:prompt}]})}); }
   catch(e){throw new Error("Connexion impossible: "+e.message);}
   if(!res.ok){var m="";try{var ed=await res.json();m=(ed.error&&ed.error.message)||"";}catch(_){}throw new Error("Erreur API "+res.status+(m?" - "+m:""));}
@@ -194,7 +194,7 @@ async function aiAnalyse(dayCtx,cfg) {
   var instr="\n=== MISSION ===\nDiabetologue expert. JSON brut valide uniquement.\nChamps: resume, score_equilibre(1-10), analyse_doses:[{repas,dose_injectee,dose_ideale,ecart,explication}], adaptation_ratios:{ratioIC_actuel,ratioIC_suggere,fc_actuel,fc_suggere,explication}, analyse_nocturne:{bilan,suggestion_lente,risque_hypo_nuit}, recommandations:[string]";
   var res;
   try{res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getAIHeaders(cfg && cfg.anthropicKey),
-    body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
+    body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,
       messages:[{role:"user",content:lines.join("\n")+instr}]})});}
   catch(e){throw new Error("Connexion impossible: "+e.message);}
   if(!res.ok){var m2="";try{var ed2=await res.json();m2=(ed2.error&&ed2.error.message)||"";}catch(_){}throw new Error("Erreur API "+res.status+(m2?" - "+m2:""));}
@@ -531,7 +531,7 @@ function ConfigPanel({cfg,onSave,allData}){
     if(pts.length<3){setRcResult({ok:false,msg:"Pas assez de donnees ("+pts.length+" repas avec Dexcom). Minimum 3."});setRcLoading(false);return;}
     try{
       var prompt="Donnees repas:\n"+pts.map(function(p){return p.d+" "+p.r+": glucides="+p.g+"g gly_pre="+p.gp+"g/L dose="+p.di+"UI gly_post="+p.gpost.toFixed(2)+"g/L";}).join("\n")+"\nParams actuels: ratioIC="+ratio+", fc="+fc+"\nJSON uniquement: {ratioIC:number,fc:number,note:string,fiabilite:string}";
-      var res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getAIHeaders(anthropicKey),body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+      var res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getAIHeaders(anthropicKey),body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,messages:[{role:"user",content:prompt}]})});
       var d=await res.json();
       var r=parseJSON(((d.content&&d.content.find(function(c){return c.type==="text";}))||{}).text||"{}");
       if(r.ratioIC)setRcResult({...r,ok:true,count:pts.length});
