@@ -205,7 +205,7 @@ async function aiGlucides(desc, apiKey) {
       method: "POST",
       headers: getHDRS(apiKey),
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         max_tokens: 1000,
         messages: [{ role: "user", content: prompt }]
       })
@@ -257,7 +257,7 @@ async function aiAnalyse(dayCtx,cfg,apiKey) {
       method: "POST",
       headers: getHDRS(apiKey),
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5",
         max_tokens: 1000,
         messages: [{ role: "user", content: fullPrompt }]
       })
@@ -622,7 +622,7 @@ function ConfigPanel({cfg,onSave,allData}){
         +"\n\nParametres actuels: ratioIC="+ratio+", fc="+fc+", ciblePre="+cible
         +"\n\nCalcule les parametres optimaux. JSON uniquement: {ratioIC:number,fc:number,ciblePre:number,note:string,fiabilite:string}";
       const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getHDRS(cfg.apiKey||""),
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
+        body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1000,
           messages:[{role:"user",content:"Tu es un expert en insulinotherapie. Calcule les parametres depuis ces donnees reelles. Reponds en JSON uniquement.\n\n"+prompt}]})});
       const d=await res.json();
       const r=parseJSON(((d.content&&d.content.find(c=>c.type==="text"))||{}).text||"{}");
