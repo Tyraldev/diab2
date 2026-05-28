@@ -1,33 +1,9 @@
-export const config = {
-  api: { bodyParser: { sizeLimit: "1mb" } }
-};
+export const config = { api: { bodyParser: { sizeLimit: "1mb" } } };
 
-const DEXCOM_BASE = {
-  eu: "https://shareous1.dexcom.com",
-  us: "https://share2.dexcom.com",
-};
-
-// Try multiple app IDs - ONE+ may require a different one
-const APP_IDS = [
-  "d8665ade-9673-4e27-9ff6-92db4ce13d13", // Dexcom Share iOS
-  "d89443d2-327c-4a6f-89e5-496bbb0317db", // Dexcom Share Android
-  "28b4cdca-b6d5-4ca2-b7d2-2cc1b9fb7d23", // Dexcom G5 mobile
-];
-
-const NULL_UUID = "00000000-0000-0000-0000-000000000000";
-
-async function tryLogin(base, username, password, appId, endpoint) {
-  const r = await fetch(`${base}/ShareWebServices/Services/General/${endpoint}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Accept": "application/json" },
-    body: JSON.stringify({ accountName: username, password, applicationId: appId }),
-  });
-  const txt = await r.text();
-  if (!r.ok) return null;
-  const sid = txt.replace(/^"|"$/g, "").trim();
-  if (sid === NULL_UUID || sid === "" || sid.length < 10) return null;
-  return sid;
-}
+const CLIENT_ID = process.env.DEXCOM_CLIENT_ID;
+const CLIENT_SECRET = process.env.DEXCOM_CLIENT_SECRET;
+const REDIRECT_URI = process.env.DEXCOM_REDIRECT_URI || "https://diab2.vercel.app/api/callback";
+const DEXCOM_API = "https://api.eu.dexcom.com";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -37,69 +13,41 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   let body = req.body;
-  if (typeof body === "string") {
-    try { body = JSON.parse(body); } catch(e) { return res.status(400).json({ error: "Invalid JSON body" }); }
-  }
+  if (typeof body === "string") { try { body = JSON.parse(body); } catch(e) { return res.status(400).json({ error: "Invalid JSON" }); } }
   if (!body) return res.status(400).json({ error: "Empty body" });
 
-  const { action, region, username, password, sessionId, minutes, maxCount } = body;
-  const base = DEXCOM_BASE[region] || DEXCOM_BASE.eu;
+  const { action, accessToken, refreshToken } = body;
 
   try {
-    if (action === "login") {
-      // Try multiple endpoints and app IDs
-      const attempts = [
-        { endpoint: "LoginPublisherAccountByName", appId: APP_IDS[0] },
-        { endpoint: "LoginAccountByName",          appId: APP_IDS[0] },
-        { endpoint: "LoginPublisherAccountByName", appId: APP_IDS[1] },
-        { endpoint: "LoginAccountByName",          appId: APP_IDS[1] },
-        { endpoint: "LoginPublisherAccountByName", appId: APP_IDS[2] },
-        { endpoint: "LoginAccountByName",          appId: APP_IDS[2] },
-      ];
+    if (action === "auth_url") {
+      const url = DEXCOM_API+"/v2/oauth2/login?client_id="+CLIENT_ID+"&redirect_uri="+encodeURIComponent(REDIRECT_URI)+"&response_type=code&scope=offline_access";
+      return res.status(200).json({ url });
+    }
 
-      let sid = null;
-      let usedAttempt = null;
-      for (const attempt of attempts) {
-        sid = await tryLogin(base, username, password, attempt.appId, attempt.endpoint);
-        if (sid) { usedAttempt = attempt; break; }
-      }
-
-      if (!sid) {
-        return res.status(401).json({
-          error: "Identifiants incorrects ou compte Dexcom ONE+ incompatible avec l API Share. Verifiez votre email et mot de passe."
-        });
-      }
-
-      return res.status(200).json({
-        sessionId: sid,
-        method: usedAttempt.endpoint,
-        appId: usedAttempt.appId
+    if (action === "refresh") {
+      const r = await fetch(DEXCOM_API+"/v2/oauth2/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ grant_type:"refresh_token", refresh_token:refreshToken, client_id:CLIENT_ID, client_secret:CLIENT_SECRET }).toString()
       });
+      const t = await r.json();
+      if (!r.ok) return res.status(401).json({ error: "Refresh failed: "+JSON.stringify(t) });
+      return res.status(200).json({ accessToken:t.access_token, refreshToken:t.refresh_token, expiresAt:Date.now()+t.expires_in*1000 });
     }
 
     if (action === "readings") {
-      const mins = minutes || 1440;
-      const count = maxCount || 288;
-      const url = `${base}/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId=${sessionId}&minutes=${mins}&maxCount=${count}`;
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      const now = new Date();
+      const start = new Date(now.getTime()-24*60*60*1000).toISOString().slice(0,19);
+      const end = now.toISOString().slice(0,19);
+      const r = await fetch(DEXCOM_API+"/v3/users/self/egvs?startDate="+start+"&endDate="+end, {
+        headers: { "Authorization": "Bearer "+accessToken }
       });
-      const txt = await r.text();
-      if (!r.ok) return res.status(r.status).json({ error: "Readings failed ("+r.status+"): " + txt.slice(0,300) });
-      if (!txt || txt.trim() === "" || txt.trim() === "null") {
-        return res.status(200).json({ readings: [] });
-      }
-      try {
-        const data = JSON.parse(txt);
-        return res.status(200).json({ readings: Array.isArray(data) ? data : [] });
-      } catch(e) {
-        return res.status(500).json({ error: "Parse error: " + txt.slice(0, 200) });
-      }
+      if (r.status === 401) return res.status(401).json({ error:"Token expired", code:"TOKEN_EXPIRED" });
+      if (!r.ok) { const t=await r.text(); return res.status(r.status).json({ error:"Readings failed: "+t.slice(0,200) }); }
+      const data = await r.json();
+      return res.status(200).json({ readings: data.egvs || [] });
     }
 
-    return res.status(400).json({ error: "Unknown action: " + action });
-  } catch (e) {
-    return res.status(500).json({ error: e.message });
-  }
+    return res.status(400).json({ error: "Unknown action: "+action });
+  } catch(e) { return res.status(500).json({ error: e.message }); }
 }
