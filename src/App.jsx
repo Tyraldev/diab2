@@ -537,10 +537,10 @@ function DexcomLive({allData,saveAll,cfg}){
     return()=>{if(intervalRef.current)clearInterval(intervalRef.current);};
   },[]);
 
-  const connect=async()=>{
+  const connect=()=>{
     setLoading(true);
-    try{const url=await dexcomGetAuthUrl();window.location.href=url;}
-    catch(e){setStatus({type:"error",msg:"Erreur: "+e.message});setLoading(false);}
+    // Redirect through our server which handles the OAuth flow
+    window.location.href="/api/dexcom-auth";
   };
 
   const disconnect=()=>{
