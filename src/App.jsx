@@ -500,12 +500,6 @@ function egvsToPoints(egvs){
     return{time:dt.toTimeString().slice(0,5),value:gl,ts:dt.toISOString(),trend:e.trend||""};
   }).filter(Boolean).sort((a,b)=>a.ts.localeCompare(b.ts));
 }
-function groupByDay(points){
-  const byDay={};
-  points.forEach(p=>{const dk=p.ts.slice(0,10);if(!byDay[dk])byDay[dk]=[];byDay[dk].push(p);});
-  return byDay;
-}
-
 
 function DexcomLive({allData,saveAll,cfg}){
   const [open,setOpen]=useState(false);
