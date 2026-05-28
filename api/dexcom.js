@@ -3,7 +3,7 @@ export const config = { api: { bodyParser: { sizeLimit: "1mb" } } };
 const CLIENT_ID = process.env.DEXCOM_CLIENT_ID;
 const CLIENT_SECRET = process.env.DEXCOM_CLIENT_SECRET;
 const REDIRECT_URI = process.env.DEXCOM_REDIRECT_URI || "https://diab2.vercel.app/api/callback";
-const DEXCOM_API = "https://api.dexcom.com";
+const DEXCOM_API = "https://sandbox-api.dexcom.com";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
