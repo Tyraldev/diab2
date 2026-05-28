@@ -509,7 +509,7 @@ function DexcomLive({allData,saveAll,cfg}){
       Object.keys(byDay).forEach(dk=>{newDays[dk]={...(newDays[dk]||{}),dexcomCurve:byDay[dk]};});
       saveAll({...allData,days:newDays,dexcomOAuth:tkns});
       setLastSync(new Date());
-      setStatus({type:"ok",msg:points.length+" mesures synchronisees"});
+      setStatus({type:"ok",msg:points.length+" mesures synchronisees"+(points.length===0?" (verifiez debug dans console)":"")});
     }catch(e){
       if(e.message==="TOKEN_EXPIRED"){
         try{const refreshed=await dexcomRefreshAPI(tokens.refreshToken);const tkns={...tokens,...refreshed};saveAll({...allData,dexcomOAuth:tkns});await doSync(tkns);}
