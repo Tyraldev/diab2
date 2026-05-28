@@ -200,7 +200,7 @@ async function aiGlucidesPhoto(photoB64, desc, apiKey) {
   const mediaType = photoB64.split(";")[0].split(":")[1] || "image/jpeg";
   const data = photoB64.split(",")[1];
   const prompt = "Tu es un dieteticien expert. Regarde cette photo de repas"
-    + (desc   " ("+desc+")" : "")
+    + (desc ? " ("+desc+")" : "")
     + ". Estime les glucides. JSON uniquement: {total:number,confidence:string,items:[{name:string,glucides:number}],conseil:string}";
   let res;
   try {
@@ -241,7 +241,7 @@ async function aiGlucides(desc, apiKey) {
   if (!res.ok) {
     let msg = "";
     try { const ed = await res.json(); msg = (ed.error && ed.error.message) || ""; } catch(_) {}
-    throw new Error("Erreur API " + res.status + (msg   " - " + msg : ""));
+    throw new Error("Erreur API " + res.status + (msg ? " - " + msg : ""));
   }
   let d;
   try { d = await res.json(); } catch(e) { throw new Error("Reponse illisible"); }
@@ -920,7 +920,7 @@ function analyseLocal(dayData, cfg) {
 
     conseils.push({
       repas: meal.label,
-      gly_pre: glyPre   glyPre.toFixed(2) : "",
+      gly_pre: glyPre ? glyPre.toFixed(2) : "",
       glucides: meal.glucides,
       dose_injectee: meal.doseInj > 0 ? meal.doseInj.toFixed(1) : "0",
       dose_ideale: doseIdeale.toFixed(1),
@@ -1277,7 +1277,7 @@ function AdaptiveBanner({ allData, cfg, onApply }) {
             </div>
             {parseFloat(change) !== 0 && (
               <div style={{ fontSize: 10, color: parseFloat(change) > 0 ? C.orange : C.blue, textAlign: "center", marginTop: 4, fontWeight: 600 }}>
-                {parseFloat(change) > 0   "+" : ""}{change} ({parseFloat(change) > 0   "augmente" : "reduit"})
+                {parseFloat(change) > 0 ? "+" : ""}{change} ({parseFloat(change) > 0 ? "augmente" : "reduit"})
               </div>
             )}
           </div>
