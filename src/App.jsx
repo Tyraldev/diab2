@@ -573,7 +573,7 @@ function DexcomLive({allData,saveAll,cfg}){
           Connexion securisee via le site officiel Dexcom.<br/>
           Vous serez redirige vers Dexcom pour autoriser l acces.
         </div>
-        <PBtn onClick={e=>{e.stopPropagation();connect(e);}} color={C.blue} full>Se connecter avec Dexcom</PBtn>
+        <a href="/api/dexcom-auth" onClick={e=>e.stopPropagation()} style={{display:"block",width:"100%",padding:"10px 18px",background:C.blue,color:"white",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",boxSizing:"border-box"}}>Se connecter avec Dexcom</a>
       </div>) : (<div>
         <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.green}}>
           <strong>Connecte a Dexcom ONE+</strong><br/>Synchro automatique toutes les 5 minutes.
