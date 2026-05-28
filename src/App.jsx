@@ -143,16 +143,16 @@ function estimateCarbsLocal(text) {
         }
       }
       // explicit grams override (e.g. "100g de pates")
-      const gM = before.match(/(\d+)\s*( :g|gr|grammes )\b/);
+      const gM = before.match(/(\d+)\s*(?:g|gr|grammes?)\b/);
       let carbs;
       if (gM && (food.unit === "portion" || food.unit === "g")) {
         // estimate from raw weight - use g value as per-100g rough
         const grams = parseFloat(gM[1]);
-        carbs = Math.round(food.g * (grams / 100) * (food.unit === "portion"   (100/150) : 1));
+        carbs = Math.round(food.g * (grams / 100) * (food.unit === "portion" ? (100/150) : 1));
         items.push({ name: food.label + " (" + grams + "g)", glucides: carbs });
       } else {
         carbs = Math.round(food.g * qty);
-        const qtyLabel = qty !== food.def || qty !== 1   qty + " " + food.unit + (qty > 1   "s" : "") + " " : "";
+        const qtyLabel = (qty !== food.def || qty !== 1) ? (qty + " " + food.unit + (qty > 1 ? "s" : "") + " ") : "";
         items.push({ name: qtyLabel + food.label, glucides: carbs });
       }
       used.add(fi);
@@ -264,7 +264,7 @@ async function aiAnalyse(dayCtx, cfg, apiKey) {
     const gp = meal.glyManuelle || meal.glycemieAuto || meal.glyEffective;
     const di = parseFloat(meal.insulineRapide||0)+parseFloat(meal.bolusCorrection||0);
     const g = parseFloat(meal.glucides)||0;
-    const ideal = g>0   g/cfg.ratioIC + (gp&&parseFloat(gp)>cfg.ciblePre (parseFloat(gp)-cfg.ciblePre)/cfg.fc:0) : 0;
+    const ideal = g>0 ? g/cfg.ratioIC + (gp&&parseFloat(gp)>cfg.ciblePre ? (parseFloat(gp)-cfg.ciblePre)/cfg.fc :0) : 0;
     lines.push(m.label+"("+meal.time+"): glucides="+g+"g gly_avant="+(gp||" ")+"g/L dose_injectee="+di.toFixed(1)+"UI dose_ideale="+ideal.toFixed(1)+"UI ecart="+(di>0 Math.round((di-ideal)*10)/10:" ")+"UI");
   });
   const correctifs = dayCtx.correctifs || [];
@@ -870,7 +870,7 @@ function analyseLocal(dayData, cfg) {
     const pct = Math.round(inTarget / allGly.length * 100);
     const avg = allGly.reduce((s, v) => s + v, 0) / allGly.length;
     score = Math.round(Math.min(10, Math.max(1, pct / 10)));
-    resume = "Sur " + allGly.length + " glycemie" + (allGly.length > 1   "s" : "") + " pre-prandiale" + (allGly.length > 1   "s" : "") + " (moyenne " + avg.toFixed(2) + " g/L), " + inTarget + " sur " + allGly.length + " " + (inTarget > 1   "sont" : "est") + " dans votre cible. ";
+    resume = "Sur " + allGly.length + " glycemie" + (allGly.length > 1 ? "s" : "") + " pre-prandiale" + (allGly.length > 1 ? "s" : "") + " (moyenne " + avg.toFixed(2) + " g/L), " + inTarget + " sur " + allGly.length + " " + (inTarget > 1 ? "sont" : "est") + " dans votre cible. ";
     if (pct >= 70) resume += "Bon controle avant les repas.";
     else if (avg > cfg.tMax) resume += "Les valeurs sont globalement au-dessus de la cible.";
     else if (avg < cfg.tMin) resume += "Les valeurs sont plutot basses, attention aux hypos.";
@@ -885,7 +885,7 @@ function analyseLocal(dayData, cfg) {
     const cAvg = vals.reduce((s, v) => s + v, 0) / vals.length;
     const tir = Math.round(vals.filter(v => v >= cfg.tMin && v <= cfg.tMax).length / vals.length * 100);
     score = Math.round(Math.min(10, Math.max(1, tir / 10)));
-    resume = "Courbe Dexcom: moyenne " + cAvg.toFixed(2) + " g/L, " + tir + "% du temps dans la cible. " + (tir >= 70   "Bon equilibre." : "Equilibre perfectible.");
+    resume = "Courbe Dexcom: moyenne " + cAvg.toFixed(2) + " g/L, " + tir + "% du temps dans la cible. " + (tir >= 70 ? "Bon equilibre." : "Equilibre perfectible.");
     const below = vals.filter(v => v < 0.7).length / vals.length * 100;
     if (below > 1) obs.push({ heure: "", type: "hypo", texte: "Hypoglycemies detectees (" + Math.round(below) + "% sous 0.70 g/L)." });
   }
@@ -895,9 +895,9 @@ function analyseLocal(dayData, cfg) {
     if (!meal.glucides) return;
     const glyPre = meal.glyPre;
     const bolusRepas = meal.glucides / cfg.ratioIC;
-    const bolusCorr = (glyPre && glyPre > cfg.ciblePre)   (glyPre - cfg.ciblePre) / cfg.fc : 0;
+    const bolusCorr = (glyPre && glyPre > cfg.ciblePre) ? (glyPre - cfg.ciblePre) / cfg.fc : 0;
     const doseIdeale = bolusRepas + bolusCorr;
-    const ecart = meal.doseInj > 0   Math.round((meal.doseInj - doseIdeale) * 10) / 10 : 0;
+    const ecart = meal.doseInj > 0 ? Math.round((meal.doseInj - doseIdeale) * 10) / 10 : 0;
 
     let explication = "Pour " + meal.glucides + "g de glucides, bolus repas theorique de " + bolusRepas.toFixed(1) + " UI";
     if (bolusCorr > 0) explication += " + " + bolusCorr.toFixed(1) + " UI de correction (glycemie " + glyPre.toFixed(2) + " au-dessus de la cible " + cfg.ciblePre + ")";
@@ -922,7 +922,7 @@ function analyseLocal(dayData, cfg) {
       repas: meal.label,
       gly_pre: glyPre   glyPre.toFixed(2) : "",
       glucides: meal.glucides,
-      dose_injectee: meal.doseInj > 0   meal.doseInj.toFixed(1) : "0",
+      dose_injectee: meal.doseInj > 0 ? meal.doseInj.toFixed(1) : "0",
       dose_ideale: doseIdeale.toFixed(1),
       ecart: ecart,
       explication: explication,
@@ -1243,8 +1243,8 @@ function AdaptiveBanner({ allData, cfg, onApply }) {
 
   if (!suggestion || dismissed || applied) return null;
 
-  const icDir = suggestion.icChange > 0   "augmente" : "reduit";
-  const fcDir = suggestion.fcChange > 0   "augmente" : "reduit";
+  const icDir = suggestion.icChange > 0 ? "augmente" : "reduit";
+  const fcDir = suggestion.fcChange > 0 ? "augmente" : "reduit";
 
   return (
     <div style={{ borderRadius: 12, border: "2px solid " + C.orange, background: "#fffbeb", padding: "14px 16px", marginBottom: 12 }}>
@@ -1272,11 +1272,11 @@ function AdaptiveBanner({ allData, cfg, onApply }) {
               <span style={{ color: C.orange, fontSize: 16 }}> </span>
               <div style={{ textAlign: "center" }}>
                 <div style={{ fontSize: 10, color: C.muted }}>Suggere</div>
-                <div style={{ fontWeight: 800, fontSize: 14, color: parseFloat(change) !== 0   C.orange : C.green }}>{proposed}</div>
+                <div style={{ fontWeight: 800, fontSize: 14, color: parseFloat(change) !== 0 ? C.orange : C.green }}>{proposed}</div>
               </div>
             </div>
             {parseFloat(change) !== 0 && (
-              <div style={{ fontSize: 10, color: parseFloat(change) > 0   C.orange : C.blue, textAlign: "center", marginTop: 4, fontWeight: 600 }}>
+              <div style={{ fontSize: 10, color: parseFloat(change) > 0 ? C.orange : C.blue, textAlign: "center", marginTop: 4, fontWeight: 600 }}>
                 {parseFloat(change) > 0   "+" : ""}{change} ({parseFloat(change) > 0   "augmente" : "reduit"})
               </div>
             )}
