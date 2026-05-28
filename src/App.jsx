@@ -892,4 +892,489 @@ export default function App(){
       {reportHtml&&<div style={{borderRadius:14,overflow:"hidden",border:"1.5px solid "+C.border}}><iframe srcDoc={reportHtml} style={{width:"100%",height:"80vh",border:"none",display:"block"}} title="Rapport"/></div>}
     </div>)}
   </div>);
+//    DEXCOM OFFICIAL API (OAuth)                                                
+async function dexcomGetAuthUrl() {
+  const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"auth_url"})});
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  return d.url;
+}
+
+async function dexcomReadings(accessToken) {
+  const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"readings",accessToken})});
+  const d = await r.json();
+  if (d.error && d.code === "TOKEN_EXPIRED") throw new Error("TOKEN_EXPIRED");
+  if (d.error) throw new Error(d.error);
+  return d.readings || [];
+}
+
+async function dexcomRefresh(refreshToken) {
+  const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"refresh",refreshToken})});
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+
+function egvsToPoints(egvs) {
+  return egvs.map(e => {
+    const dt = new Date(e.systemTime || e.displayTime);
+    if (isNaN(dt)) return null;
+    const mgdl = parseFloat(e.value);
+    if (isNaN(mgdl)) return null;
+    const gl = (mgdl / 100).toFixed(2);
+    return {time: dt.toTimeString().slice(0,5), value: gl, ts: dt.toISOString(), trend: e.trend || ""};
+  }).filter(Boolean).sort((a,b) => a.ts.localeCompare(b.ts));
+}
+
+function groupByDay(points) {
+  const byDay = {};
+  points.forEach(p => {
+    const dk = p.ts.slice(0,10);
+    if (!byDay[dk]) byDay[dk] = [];
+    byDay[dk].push(p);
+  });
+  return byDay;
+}
+
+function DexcomLive({allData, saveAll, cfg}) {
+  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const intervalRef = useRef(null);
+
+  const creds = allData.dexcomOAuth || null;
+  const isConnected = !!(creds && creds.accessToken);
+
+  const doSync = async (tokens) => {
+    try {
+      let tkns = tokens;
+      // Refresh if expired
+      if (tkns.expiresAt && Date.now() > tkns.expiresAt - 60000) {
+        const refreshed = await dexcomRefresh(tkns.refreshToken);
+        tkns = {...tkns, ...refreshed};
+        saveAll({...allData, dexcomOAuth: tkns});
+      }
+      const egvs = await dexcomReadings(tkns.accessToken);
+      const points = egvsToPoints(egvs);
+      const byDay = groupByDay(points);
+      const newDays = {...(allData.days || {})};
+      Object.keys(byDay).forEach(dk => {
+        newDays[dk] = {...(newDays[dk] || {}), dexcomCurve: byDay[dk]};
+      });
+      saveAll({...allData, days: newDays, dexcomOAuth: tkns});
+      setLastSync(new Date());
+      setStatus({type:"ok", msg: points.length+" mesures synchronisees"});
+    } catch(e) {
+      if (e.message === "TOKEN_EXPIRED") {
+        try {
+          const refreshed = await dexcomRefresh(tokens.refreshToken);
+          const tkns = {...tokens, ...refreshed};
+          saveAll({...allData, dexcomOAuth: tkns});
+          await doSync(tkns);
+        } catch(e2) {
+          setStatus({type:"error", msg:"Session expiree - reconnectez-vous"});
+        }
+      } else {
+        setStatus({type:"error", msg:"Erreur: "+e.message});
+      }
+    }
+  };
+
+  // Read tokens from URL after OAuth redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const access = params.get("dexcom_access");
+    const refresh = params.get("dexcom_refresh");
+    const expires = params.get("dexcom_expires");
+    const error = params.get("dexcom_error");
+
+    if (error) {
+      setStatus({type:"error", msg:"Erreur Dexcom: "+decodeURIComponent(error)});
+      window.history.replaceState({}, "", "/");
+    }
+
+    if (access && refresh) {
+      const tkns = {accessToken: access, refreshToken: refresh, expiresAt: parseInt(expires)||0};
+      saveAll({...allData, dexcomOAuth: tkns});
+      window.history.replaceState({}, "", "/");
+      setStatus({type:"ok", msg:"Compte Dexcom connecte ! Synchronisation en cours..."});
+      setTimeout(() => doSync(tkns), 1000);
+    }
+  }, []);
+
+  // Auto-refresh every 5 min
+  useEffect(() => {
+    if (creds && creds.accessToken) {
+      doSync(creds);
+      intervalRef.current = setInterval(() => doSync(creds), 5*60*1000);
+    }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+  }, []);
+
+  const connect = async () => {
+    setLoading(true);
+    try {
+      const url = await dexcomGetAuthUrl();
+      window.location.href = url;
+    } catch(e) {
+      setStatus({type:"error", msg:"Erreur: "+e.message});
+      setLoading(false);
+    }
+  };
+
+  const disconnect = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    const nd = {...allData};
+    delete nd.dexcomOAuth;
+    saveAll(nd);
+    setStatus(null);
+    setLastSync(null);
+  };
+
+  const todayCurve = allData.days && allData.days[TODAY()] && allData.days[TODAY()].dexcomCurve;
+  const lastGly = todayCurve && todayCurve.length > 0 ? todayCurve[todayCurve.length-1] : null;
+  const trendArrow = {"flat":"->","fortyfiveup":"/->","singleup":"^","doubleup":"^^","fortyfivedown":"\->","singledown":"v","doubledown":"vv"};
+
+  return (
+    <div style={{borderRadius:14,border:"2px solid "+(isConnected ? C.green : C.blue),background:isConnected ? "#f0fdf4" : "#eff6ff",marginBottom:12}}>
+      <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{background:isConnected ? C.green : C.blue,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>{isConnected ? "LIVE" : "Dexcom"}</span>
+          <div>
+            <div style={{fontWeight:700,color:C.text,fontSize:15}}>Dexcom ONE+ - Temps reel</div>
+            <div style={{fontSize:12,color:C.muted}}>{isConnected ? (lastGly ? "Derniere valeur: "+lastGly.value+" g/L "+(trendArrow[lastGly.trend.toLowerCase()]||"")+(lastSync ? " - sync "+lastSync.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}) : "") : "Connecte - en attente") : "Connexion via votre compte Dexcom"}</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {isConnected&&lastGly&&<span style={{fontWeight:800,fontSize:18,color:glyColor(lastGly.value,cfg)}}>{lastGly.value+" g/L"}</span>}
+          {isConnected&&<button onClick={e=>{e.stopPropagation();doSync(creds);}} style={{padding:"4px 10px",background:C.green,color:"white",border:"none",borderRadius:6,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Sync</button>}
+          <span style={{color:C.muted}}>{open ? "^" : "v"}</span>
+        </div>
+      </div>
+      {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid "+(isConnected ? "#86efac" : "#bfdbfe")}}>
+        {!isConnected ? (
+          <div>
+            <div style={{background:"#dbeafe",borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:C.blue}}>
+              Connexion securisee via le site officiel Dexcom.<br/>
+              Vous serez redirige vers Dexcom pour autoriser l acces, puis ramene ici automatiquement.
+            </div>
+            <PBtn onClick={connect} disabled={loading} color={C.blue} full>{loading ? "Redirection..." : "Se connecter avec Dexcom"}</PBtn>
+          </div>
+        ) : (
+          <div>
+            <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.green}}>
+              <strong>Connecte a Dexcom ONE+</strong><br/>
+              Synchro automatique toutes les 5 minutes.
+            </div>
+            {lastSync&&<div style={{fontSize:11,color:C.muted,marginBottom:10}}>{"Derniere synchro: "+lastSync.toLocaleString("fr-FR")}</div>}
+            <div style={{display:"flex",gap:8}}>
+              <PBtn onClick={()=>doSync(creds)} color={C.green} full>Synchroniser maintenant</PBtn>
+              <OBtn onClick={disconnect} color={C.red} small>Deconnecter</OBtn>
+            </div>
+          </div>
+        )}
+        {status&&<div style={{marginTop:10,padding:"8px 12px",borderRadius:8,fontSize:13,background:status.type==="error" ? "#fef2f2" : "#f0fdf4",color:status.type==="error" ? C.red : C.green,border:"1px solid "+(status.type==="error" ? "#fca5a5" : "#86efac")}}>{status.msg}</div>}
+      </div>)}
+    </div>
+  );
+}
+
+
+function ClarityImporter({allData,saveAll}){
+  const [open,setOpen]=useState(false);
+  const [parsed,setParsed]=useState(null);
+  const [status,setStatus]=useState(null);
+  const [imported,setImported]=useState(false);
+  const ref=useRef();
+  const handleFile=file=>{setStatus(null);setParsed(null);setImported(false);const reader=new FileReader();reader.onload=e=>{const result=parseDexcomCSV(e.target.result);if(!result){setStatus({type:"error",msg:"Format non reconnu."});return;}if(result.error){setStatus({type:"error",msg:result.error});return;}const dc=Object.keys(result).length,pc=Object.values(result).reduce((s,a)=>s+a.length,0);setParsed(result);setStatus({type:"ok",msg:pc+" mesures sur "+dc+" jour"+(dc>1 ? "s" : "")+"."});};reader.readAsText(file);};
+  const doImport=()=>{if(!parsed)return;const nd={...allData.days};Object.entries(parsed).forEach(([dk,pts])=>{nd[dk]={...(nd[dk]||{}),dexcomCurve:pts};});saveAll({...allData,days:nd});setImported(true);setStatus({type:"success",msg:"Import OK - "+Object.keys(parsed).length+" jours mis a jour."});};
+  return(<div style={{borderRadius:14,border:"1.5px solid "+C.blue,background:"#eff6ff",marginBottom:12}}>
+    <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{background:C.blue,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>CSV</span>
+        <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Importer Dexcom Clarity</div>
+          <div style={{fontSize:12,color:C.muted}}>{imported ? "Import OK" : "clarity.dexcom.com - Export CSV"}</div>
+        </div>
+      </div><span style={{color:C.muted}}>{open ? "^" : "v"}</span>
+    </div>
+    {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #bfdbfe"}}>
+      <div style={{background:"#dbeafe",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:C.blue}}>clarity.dexcom.com - Rapports - icone export - Telecharger CSV</div>
+      <div onClick={()=>ref.current.click()} style={{border:"2px dashed "+(parsed ? C.green : "#93c5fd"),borderRadius:10,padding:"16px",cursor:"pointer",textAlign:"center",background:parsed ? "#f0fdf4" : "white",marginBottom:10}}>
+        <div style={{fontWeight:700,color:parsed ? C.green : C.blue,fontSize:13}}>{parsed ? "Fichier charge" : "Cliquer pour selectionner le CSV"}</div>
+      </div>
+      <input ref={ref} type="file" accept=".csv,text/csv" style={{display:"none"}} onChange={e=>{if(e.target.files[0])handleFile(e.target.files[0]);}}/>
+      {status&&<div style={{padding:"8px 12px",borderRadius:8,marginBottom:10,fontSize:13,background:status.type==="error" ? "#fef2f2" : status.type==="success" ? "#f0fdf4" : "#f0f9ff",color:status.type==="error" ? C.red : status.type==="success" ? C.green : C.blue}}>{status.msg}</div>}
+      {parsed&&!imported&&<button onClick={doImport} style={{width:"100%",padding:"12px",background:C.blue,color:"white",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>{"Importer "+Object.keys(parsed).length+" jours"}</button>}
+    </div>)}
+  </div>);
+}
+
+function ScreenshotPanel({value,onChange}){
+  const ref=useRef();
+  return(<div style={{borderRadius:14,border:"1.5px solid "+(value ? C.green : "#fcd34d"),background:value ? "#f0fdf4" : "#fffbeb",marginBottom:10,padding:"14px 16px"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{background:value ? C.green : C.orange,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>Photo</span>
+        <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Capture courbe Dexcom</div>
+          <div style={{fontSize:12,color:C.muted}}>{value ? "Capture enregistree" : "Capturez votre courbe 24h depuis l app Dexcom"}</div>
+        </div>
+      </div>
+      <label style={{cursor:"pointer",fontSize:12,color:"white",fontWeight:700,background:value ? C.green : C.orange,borderRadius:8,padding:"6px 12px"}}>{value ? "Changer" : "Importer"}<input ref={ref} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{if(e.target.files[0])onChange(await f2b64(e.target.files[0]));}} /></label>
+    </div>
+    {value&&<div style={{marginTop:10}}><img src={value} alt="" style={{width:"100%",borderRadius:8,border:"1px solid "+C.border,display:"block"}}/><button onClick={()=>onChange(null)} style={{fontSize:11,color:C.muted,background:"none",border:"none",cursor:"pointer",marginTop:6}}>Supprimer</button></div>}
+  </div>);
+}
+
+function analyseLocal(dayData,cfg){
+  const curve=dayData.dexcomCurve||[],meals=dayData.meals||{},correctifs=dayData.correctifs||[];
+  const obs=[],conseils=[],recos=[];
+  const mealList=MEALS.map(m=>({def:m,data:meals[m.id]})).filter(x=>x.data).map(x=>{
+    const d=x.data,gp=parseFloat(d.glyManuelle||d.glycemieAuto||d.glyEffective)||null;
+    const t=d.time.split(":");return{label:x.def.label,time:d.time,tMin:parseInt(t[0])*60+parseInt(t[1]),glyPre:gp,glucides:parseFloat(d.glucides)||0,doseInj:parseFloat(d.insulineRapide||0)+parseFloat(d.bolusCorrection||0)};
+  }).sort((a,b)=>a.tMin-b.tMin);
+  const allGly=mealList.map(m=>m.glyPre).filter(Boolean);
+  let score=5,resume="";
+  if(allGly.length>0){
+    const inTarget=allGly.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length;
+    const pct=Math.round(inTarget/allGly.length*100);
+    const avg=allGly.reduce((s,v)=>s+v,0)/allGly.length;
+    score=Math.round(Math.min(10,Math.max(1,pct/10)));
+    resume="Sur "+allGly.length+" glycemie"+(allGly.length>1 ? "s" : "")+" pre-prandiale"+(allGly.length>1 ? "s" : "")+" (moy "+avg.toFixed(2)+" g/L), "+pct+"% dans la cible. "+(pct>=70 ? "Bon controle." : avg>cfg.tMax ? "Valeurs globalement au-dessus." : "Controle perfectible.");
+  } else resume="Saisissez la glycemie avant chaque repas pour obtenir l analyse.";
+  if(curve.length>0){
+    const vals=curve.map(p=>parseFloat(p.value));
+    const cavg=(vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(2);
+    const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);
+    score=Math.round(Math.min(10,Math.max(1,tir/10)));
+    resume="Dexcom: moy "+cavg+" g/L, "+tir+"% dans la cible. "+(tir>=70 ? "Excellent." : "A ameliorer.");
+  }
+  mealList.forEach((meal,idx)=>{
+    if(!meal.glucides)return;
+    const bolusR=meal.glucides/cfg.ratioIC;
+    const bolusC=meal.glyPre&&meal.glyPre>cfg.ciblePre ? (meal.glyPre-cfg.ciblePre)/cfg.fc : 0;
+    const ideal=bolusR+bolusC;
+    const ecart=meal.doseInj>0 ? Math.round((meal.doseInj-ideal)*10)/10 : 0;
+    let expl="Pour "+meal.glucides+"g: bolus repas "+bolusR.toFixed(1)+" UI"+(bolusC>0 ? " + correction "+bolusC.toFixed(1)+" UI" : "")+" = ideal "+ideal.toFixed(1)+" UI. ";
+    if(meal.doseInj>0){if(Math.abs(ecart)<1)expl+="Dose bien ajustee.";else if(ecart>0)expl+="Dose de "+ecart+" UI superieure.";else expl+="Dose de "+Math.abs(ecart)+" UI inferieure.";}
+    const next=mealList[idx+1];
+    if(next&&next.glyPre){const gap=Math.round((next.tMin-meal.tMin)/60*10)/10;expl+=" Au repas suivant ("+gap+"h): "+next.glyPre.toFixed(2)+" g/L"+(next.glyPre>cfg.tMax+0.2 ? " - eleve, dose insuffisante ?" : next.glyPre<cfg.tMin ? " - trop bas, risque hypo" : "")+". ";}
+    conseils.push({repas:meal.label,gly_pre:meal.glyPre ? meal.glyPre.toFixed(2) : "",glucides:meal.glucides,dose_injectee:meal.doseInj>0 ? meal.doseInj.toFixed(1) : "0",dose_ideale:ideal.toFixed(1),ecart,explication:expl});
+  });
+  const firstMeal=mealList[0];
+  if(firstMeal&&firstMeal.glyPre){if(firstMeal.glyPre>cfg.tMax)obs.push({heure:firstMeal.time,type:"info",texte:"Glycemie elevee au lever ("+firstMeal.glyPre.toFixed(2)+" g/L): insuline lente du soir peut-etre insuffisante."});else if(firstMeal.glyPre>=cfg.tMin)obs.push({heure:firstMeal.time,type:"ok",texte:"Bon reveil ("+firstMeal.glyPre.toFixed(2)+" g/L): insuline lente bien dosee."});}
+  const resucrages=correctifs.filter(c=>c.type==="resucrage");
+  if(resucrages.length>0){const totG=resucrages.reduce((s,r)=>s+(parseFloat(r.glucides)||0),0);obs.push({heure:"",type:"resucrage",texte:resucrages.length+" resucrage"+(resucrages.length>1 ? "s" : "")+" ("+totG+"g). Signe d hypoglycemie."});recos.push("Des resucrages ont ete necessaires. La dose precedente etait peut-etre trop forte.");}
+  if(recos.length===0&&conseils.length>0)recos.push("Continuez a noter vos repas et doses.");
+  return{resume,observations:obs,correlations:[],recommandations:recos,score_equilibre:score,conseils_dosage:conseils};
+}
+
+function AnalysePanel({dayData,dayLabel,cfg,apiKey}) {
+  const [open,setOpen]=useState(false);
+  const [result,setResult]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [err,setErr]=useState(null);
+  const hasData=(dayData.meals&&Object.keys(dayData.meals).length>0)||(dayData.dexcomCurve&&dayData.dexcomCurve.length>0)||(dayData.correctifs&&dayData.correctifs.length>0);
+  const run=()=>{setErr(null);setResult(analyseLocal(dayData,cfg));};
+  const enhance=async()=>{setLoading(true);setErr(null);try{const r=await aiAnalyse({...dayData,label:dayLabel},cfg,apiKey);setResult({...r,_ai:true});}catch(e){setErr("IA indisponible ("+e.message+")");}finally{setLoading(false);};};
+  const sc=s=>s>=8 ? C.green : s>=5 ? C.orange : C.red;
+  return(<div style={{borderRadius:14,border:"1.5px solid "+C.purple,background:"#faf5ff",marginBottom:10}}>
+    <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{background:C.purple,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>IA</span>
+        <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Analyse de la veille</div>
+          <div style={{fontSize:12,color:C.muted}}>{result ? "Score: "+result.score_equilibre+"/10" : dayLabel}</div>
+        </div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>{result&&<span style={{fontWeight:800,fontSize:16,color:sc(result.score_equilibre)}}>{result.score_equilibre+"/10"}</span>}<span style={{color:C.muted}}>{open ? "^" : "v"}</span></div>
+    </div>
+    {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #ede9fe"}}>
+      {!result&&<div style={{marginBottom:12}}><p style={{fontSize:13,color:C.text,marginBottom:10}}>{"Analyse du "+dayLabel}</p><PBtn onClick={run} disabled={!hasData} color={C.purple} full>Lancer l analyse</PBtn></div>}
+      {err&&<div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 10px",marginBottom:8,fontSize:12,color:"#92400e"}}>{err}</div>}
+      {result&&(<div>
+        <div style={{background:"white",borderRadius:10,padding:14,marginBottom:10,border:"1px solid "+C.border}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+            <span style={{fontWeight:700,fontSize:14}}>Resume{result._ai ? " (IA)" : ""}</span>
+            <div style={{background:sc(result.score_equilibre||5),borderRadius:8,padding:"4px 12px"}}><div style={{color:"white",fontWeight:800,fontSize:18}}>{(result.score_equilibre||"?")+"/10"}</div></div>
+          </div>
+          <p style={{fontSize:13,color:C.text,lineHeight:1.5}}>{result.resume}</p>
+        </div>
+        {result.conseils_dosage&&result.conseils_dosage.length>0&&(<div style={{marginBottom:10}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.red,textTransform:"uppercase",marginBottom:8}}>Analyse des doses</div>
+          {result.conseils_dosage.map((d,i)=>{const ecart=parseFloat(d.ecart)||0;const dc=Math.abs(ecart)<1 ? C.green : Math.abs(ecart)<2 ? C.orange : C.red;return(<div key={i} style={{background:"white",borderRadius:10,border:"1.5px solid "+dc,padding:"10px 12px",marginBottom:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontWeight:700}}>{d.repas}</span><span style={{background:dc,color:"white",borderRadius:6,padding:"2px 10px",fontSize:12,fontWeight:700}}>{Math.abs(ecart)<0.5 ? "OK" : ecart>0 ? "+"+ecart+" UI" : Math.abs(ecart)+" UI manquantes"}</span></div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:6}}>{[["Injecte",(d.dose_injectee||"?")+" UI",C.red],["Ideale",(d.dose_ideale||"?")+" UI",dc],["Ecart",(ecart>0 ? "+" : "")+ecart+" UI",dc]].map(([l,v,col])=><div key={l} style={{textAlign:"center",background:col+"11",borderRadius:6,padding:"5px 3px"}}><div style={{fontSize:9,color:C.muted}}>{l}</div><div style={{fontSize:12,fontWeight:700,color:col}}>{v}</div></div>)}</div>
+            {d.explication&&<p style={{fontSize:12,color:C.muted,margin:0,lineHeight:1.4}}>{d.explication}</p>}
+          </div>);})}
+        </div>)}
+        {result.recommandations&&result.recommandations.length>0&&(<div style={{marginBottom:10}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.green,textTransform:"uppercase",marginBottom:8}}>Recommandations</div>
+          {result.recommandations.map((r,i)=><div key={i} style={{padding:"8px 12px",background:"#f0fdf4",borderRadius:8,marginBottom:6,borderLeft:"3px solid "+C.green,fontSize:13}}>{r}</div>)}
+        </div>)}
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <OBtn onClick={()=>setResult(null)} color={C.purple} small>Relancer</OBtn>
+          <button onClick={enhance} disabled={loading} style={{padding:"5px 12px",background:"white",color:C.orange,border:"2px solid "+C.orange,borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{loading ? "..." : "Enrichir avec IA"}</button>
+          {result._ai&&<span style={{fontSize:11,color:C.green,fontWeight:700}}>Analyse IA</span>}
+        </div>
+        {err&&<div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 10px",marginTop:8,fontSize:12,color:"#92400e"}}>{err}</div>}
+      </div>)}
+    </div>)}
+  </div>);
+}
+
+function computeAdaptive(allData,cfg){
+  const days=Object.keys(allData.days||{}).sort().slice(-7);
+  const points=[];
+  days.forEach(dk=>{
+    const day=allData.days[dk],curve=day.dexcomCurve;if(!curve||!curve.length)return;
+    MEALS.forEach(m=>{
+      const meal=day.meals&&day.meals[m.id];if(!meal||!meal.glucides)return;
+      const glyPre=parseFloat(meal.glyManuelle||meal.glycemieAuto);
+      const doseInj=parseFloat(meal.insulineRapide||0)+parseFloat(meal.bolusCorrection||0);
+      if(!glyPre||!doseInj||doseInj<0.5)return;
+      const t=meal.time.split(":");const t1=parseInt(t[0])*60+parseInt(t[1])+90,t2=parseInt(t[0])*60+parseInt(t[1])+150;
+      const post=curve.filter(p=>{const pt=p.time.split(":");const pmin=parseInt(pt[0])*60+parseInt(pt[1]);return pmin>=t1&&pmin<=t2;});
+      if(!post.length)return;
+      const glyPost=post.reduce((s,p)=>s+parseFloat(p.value),0)/post.length;
+      points.push({glyPre,glucides:parseFloat(meal.glucides),doseInj,glyPost});
+    });
+  });
+  if(points.length<2)return null;
+  const icEstimates=points.map(p=>{const corrBolus=Math.max(0,(p.glyPre-cfg.ciblePre)/cfg.fc);const mealBolus=p.doseInj-corrBolus;if(mealBolus<=0.5||p.glucides<=10)return null;return{v:p.glucides/mealBolus,w:Math.max(0.1,1-Math.abs(p.glyPost-cfg.ciblePre))};}).filter(Boolean);
+  if(!icEstimates.length)return null;
+  const wSum=icEstimates.reduce((s,e)=>s+e.w,0);
+  const icNew=icEstimates.reduce((s,e)=>s+e.v*e.w,0)/wSum;
+  const icSmoothed=Math.round((icNew*0.6+cfg.ratioIC*0.4)*2)/2;
+  if(Math.abs(icSmoothed-cfg.ratioIC)<0.5)return null;
+  const avgPost=points.reduce((s,p)=>s+p.glyPost,0)/points.length;
+  const pctInTarget=Math.round(points.filter(p=>p.glyPost>=cfg.tMin&&p.glyPost<=cfg.tMax).length/points.length*100);
+  return{ratioIC:icSmoothed,icChange:Math.round((icSmoothed-cfg.ratioIC)*10)/10,points:points.length,pctInTarget,assessment:avgPost>cfg.tMax+0.2 ? "Glycemies post-prandiales globalement au-dessus de la cible." : "Glycemies post-prandiales dans la zone acceptable."};
+}
+
+function AdaptiveBanner({allData,cfg,onApply}){
+  const [suggestion,setSuggestion]=useState(null);
+  const [dismissed,setDismissed]=useState(false);
+  const [applied,setApplied]=useState(false);
+  useEffect(()=>{if(!allData||!cfg)return;setSuggestion(computeAdaptive(allData,cfg));},[]);
+  if(!suggestion||dismissed||applied)return null;
+  return(<div style={{borderRadius:12,border:"2px solid "+C.orange,background:"#fffbeb",padding:"14px 16px",marginBottom:12}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <span style={{background:C.orange,color:"white",borderRadius:8,padding:"3px 8px",fontSize:11,fontWeight:700}}>ADAPTATIF</span>
+        <span style={{fontWeight:700,color:C.orange,fontSize:14}}>Mise a jour du ratio suggeree</span>
+      </div>
+      <button onClick={()=>setDismissed(true)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:16}}>x</button>
+    </div>
+    <p style={{fontSize:12,color:C.muted,marginBottom:6}}>{suggestion.assessment}</p>
+    <p style={{fontSize:11,color:C.muted,marginBottom:10}}>{"Analyse sur "+suggestion.points+" repas - "+suggestion.pctInTarget+"% post-prandiaux dans la cible."}</p>
+    <div style={{background:"white",borderRadius:8,padding:"8px 10px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted}}>Actuel</div><div style={{fontWeight:700,fontSize:14}}>{cfg.ratioIC+"g/UI"}</div></div>
+      <span style={{color:C.orange,fontSize:16}}>{"->"}</span>
+      <div style={{textAlign:"center"}}><div style={{fontSize:10,color:C.muted}}>Suggere</div><div style={{fontWeight:800,fontSize:14,color:C.orange}}>{suggestion.ratioIC+"g/UI"}</div></div>
+    </div>
+    <div style={{display:"flex",gap:8}}>
+      <PBtn onClick={()=>{onApply({...cfg,ratioIC:suggestion.ratioIC});setApplied(true);}} color={C.green} full>Appliquer</PBtn>
+      <OBtn onClick={()=>setDismissed(true)} color={C.muted} small>Ignorer</OBtn>
+    </div>
+  </div>);
+}
+
+function buildReport(allData,from,to){
+  const days=[];let d=new Date(from+"T12:00:00"),end=new Date(to+"T12:00:00");
+  while(d<=end){days.push(toISO(d));d.setDate(d.getDate()+1);}
+  const cfg=allData.cfg||DEF;
+  const allG=days.reduce((arr,day)=>arr.concat(((allData.days[day]&&allData.days[day].dexcomCurve)||[]).map(p=>parseFloat(p.value))),[]);
+  const avgG=allG.length ? (allG.reduce((s,v)=>s+v,0)/allG.length).toFixed(2) : "N/A";
+  const tir=allG.length ? Math.round(allG.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/allG.length*100) : null;
+  const css="*{margin:0;padding:0;box-sizing:border-box}body{font-family:Segoe UI,sans-serif;background:#f8f9fa;color:#2d3748;font-size:13px}.hdr{background:linear-gradient(135deg,#1a365d,#2b6cb0);color:white;padding:32px 40px}.hdr h1{font-size:24px;font-weight:800}.sum{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:24px 40px;background:white}.sbox{text-align:center;padding:14px;background:#f7fafc;border-radius:10px}.sbox .v{font-size:24px;font-weight:800;color:#2b6cb0}.day{padding:20px 40px;border-bottom:2px solid #edf2f7}.dh{background:#ebf8ff;border-left:4px solid #2b6cb0;padding:10px 14px;border-radius:0 8px 8px 0;margin-bottom:14px}.card{background:white;border-radius:8px;padding:12px;border:1px solid #e2e8f0;margin-bottom:6px}.b{display:inline-block;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700;margin-right:4px}.ftr{padding:20px 40px;text-align:center;color:#a0aec0;font-size:11px}@media print{.day{page-break-inside:avoid}}";
+  let body="";
+  body+='<div class="hdr"><h1>Rapport Diabete - Dexcom ONE+</h1><p>'+fmtDay(from)+" au "+fmtDay(to)+'</p></div>';
+  body+='<div class="sum"><div class="sbox"><div class="v">'+days.length+'</div><div>Jours</div></div><div class="sbox"><div class="v">'+avgG+(avgG!=="N/A" ? " g/L" : "")+'</div><div>Moy. glycemie</div></div><div class="sbox"><div class="v">'+( tir!==null ? tir+"%" : "N/A")+'</div><div>Temps cible</div></div><div class="sbox"><div class="v">'+cfg.tMin+"-"+cfg.tMax+" g/L"+'</div><div>Cible</div></div></div>';
+  days.forEach(day=>{
+    const dd=allData.days[day]||{};
+    body+='<div class="day"><div class="dh"><h2>'+fmtDay(day)+'</h2></div>';
+    if(dd.screenshot)body+='<img src="'+dd.screenshot+'" style="width:100%;border-radius:8px;margin-bottom:12px"/>';
+    MEALS.forEach(m=>{const meal=dd.meals&&dd.meals[m.id];if(!meal)return;const b=parseFloat(meal.insulineRapide||0)+parseFloat(meal.bolusCorrection||0);const glyRep=meal.glyEffective||meal.glyManuelle||meal.glycemieAuto;
+      body+='<div class="card"><span class="b" style="background:'+m.color+'22;color:'+m.color+'">'+m.tag+'</span>'+meal.time+" - "+(meal.desc||"---");
+      if(meal.glucides)body+=' <span class="b" style="background:#fffff0;color:#b7791f">'+meal.glucides+"g</span>";
+      if(glyRep)body+=' <span class="b" style="background:#faf5ff;color:#553c9a">glyc: '+glyRep+" g/L</span>";
+      if(b>0)body+=' <span class="b" style="background:#fff5f5;color:#c53030">'+b.toFixed(1)+" UI</span>";
+      if(meal.photo)body+='<img src="'+meal.photo+'" style="max-width:220px;border-radius:6px;margin-top:8px;display:block"/>';
+      body+='</div>';
+    });
+    const correctifs=dd.correctifs||[];
+    if(correctifs.length>0){body+='<div class="card"><strong>Correctifs:</strong> ';correctifs.forEach(c=>{body+=c.type+" "+c.time+(c.gly ? " glyc:"+c.gly : "")+(c.units ? " "+c.units+"UI" : "")+(c.glucides ? " "+c.glucides+"g" : "")+" | ";});body+="</div>";}
+    body+='</div>';
+  });
+  body+='<div class="ftr">DiabeteTracker | '+VERSION+'</div>';
+  return "<!DOCTYPE html><html lang='fr'><head><meta charset='UTF-8'><title>Rapport</title><style>"+css+"</style></head><body>"+body+"</body></html>";
+}
+
+export default function App(){
+  const [allData,saveAll,ready]=useStorage();
+  const [activeDay,setActiveDay]=useState(TODAY());
+  const [tab,setTab]=useState("journal");
+  const [rFrom,setRFrom]=useState(()=>{const d=new Date();d.setDate(d.getDate()-6);return toISO(d);});
+  const [rTo,setRTo]=useState(TODAY());
+  const [reportHtml,setReportHtml]=useState(null);
+
+  if(!ready)return(<div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Segoe UI,sans-serif"}}><div style={{textAlign:"center",color:C.muted}}><div style={{fontSize:28,marginBottom:8}}>Chargement...</div></div></div>);
+
+  const cfg=allData.cfg||DEF;
+  const apiKey=cfg.apiKey||"";
+  const day=(allData.days&&allData.days[activeDay])||{};
+  const upDay=patch=>{const newDay={...day,...patch};const newDays={...allData.days};newDays[activeDay]=newDay;saveAll({...allData,days:newDays});};
+  const yday=prevDay(activeDay);
+  const ydayData=(allData.days&&allData.days[yday])||{};
+  const weekDays=Array.from({length:7},(_,i)=>{const d=new Date(rFrom+"T12:00:00");d.setDate(d.getDate()+i);return toISO(d);});
+
+  return(<div style={{background:C.bg,minHeight:"100vh",fontFamily:"Segoe UI,system-ui,sans-serif",color:C.text}}>
+    <div style={{background:"white",borderBottom:"2px solid "+C.border,padding:"14px 16px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><h1 style={{fontSize:18,fontWeight:800,color:C.red,margin:0}}>DiabeteTracker</h1><p style={{color:C.muted,fontSize:11,margin:0}}>{"Dexcom ONE+ | "+VERSION}</p></div>
+        <div style={{display:"flex",gap:6}}>{[["journal","Journal"],["report","Rapport"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"7px 14px",borderRadius:8,border:"2px solid "+(tab===k ? C.red : C.border),background:tab===k ? C.red : "white",color:tab===k ? "white" : C.muted,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>)}</div>
+      </div>
+    </div>
+
+    {tab==="journal"&&(<div style={{padding:"16px 14px 40px"}}>
+      <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:14}}>
+        {weekDays.map(d=>{
+          const fs=fmtShort(d);const isA=d===activeDay;const isT=d===TODAY();
+          const hC=!!(allData.days&&allData.days[d]&&allData.days[d].dexcomCurve);
+          const hM=!!(allData.days&&allData.days[d]&&allData.days[d].meals&&Object.keys(allData.days[d].meals).length>0);
+          return(<button key={d} onClick={()=>setActiveDay(d)} style={{flexShrink:0,minWidth:50,padding:"8px 10px",borderRadius:12,cursor:"pointer",textAlign:"center",border:"2px solid "+(isA ? C.red : C.border),background:isA ? "#fff5f5" : "white"}}>
+            <div style={{fontSize:10,color:isA ? C.red : C.muted,fontWeight:700,textTransform:"uppercase"}}>{fs.wd}</div>
+            <div style={{fontSize:18,fontWeight:800,color:isA ? C.red : C.text,lineHeight:1.3}}>{fs.day}</div>
+            <div style={{fontSize:9,color:hC ? C.blue : hM ? C.green : C.muted}}>{isT ? "auj." : hC ? "dex" : hM ? "ok" : "-"}</div>
+          </button>);
+        })}
+      </div>
+      <h2 style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:12,textTransform:"capitalize"}}>{fmtDay(activeDay)}</h2>
+      {day.dexcomCurve&&day.dexcomCurve.length>0 ? (<div style={{background:"white",border:"1.5px solid #93c5fd",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontWeight:700,fontSize:13,color:C.blue}}>Courbe Dexcom</span><span style={{fontSize:11,color:C.muted}}>{day.dexcomCurve.length+" pts"}</span></div>
+        <DayCurve pts={day.dexcomCurve} meals={day.meals} cfg={cfg} width={340} height={110}/>
+        {(()=>{const vals=day.dexcomCurve.map(p=>parseFloat(p.value));const avg=(vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(2);const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);const above=Math.round(vals.filter(v=>v>cfg.tMax).length/vals.length*100);return(<div style={{display:"flex",gap:8,marginTop:8}}>{[["Moyenne",avg+" g/L",C.blue],["Temps cible",tir+"%",tir>=70 ? C.green : C.orange],["Au-dessus",above+"%",above>20 ? C.red : C.green]].map(([l,v,col])=><div key={l} style={{flex:1,textAlign:"center",background:col+"11",borderRadius:8,padding:"5px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontSize:13,fontWeight:700,color:col}}>{v}</div></div>)}</div>);})()} 
+      </div>) : (<div style={{background:"#eff6ff",border:"1.5px dashed #93c5fd",borderRadius:12,padding:"14px 16px",marginBottom:12,textAlign:"center"}}><div style={{fontSize:13,color:C.blue,fontWeight:600}}>Aucune courbe Dexcom - importez le CSV</div></div>)}
+      <AdaptiveBanner allData={allData} cfg={cfg} onApply={nc=>saveAll({...allData,cfg:nc})}/>
+      <ConfigPanel cfg={cfg} onSave={c=>saveAll({...allData,cfg:c})} allData={allData}/>
+      <DexcomLive allData={allData} saveAll={saveAll} cfg={cfg}/>
+      <ClarityImporter allData={allData} saveAll={saveAll}/>
+      <ScreenshotPanel value={(day&&day.screenshot)||null} onChange={img=>upDay({screenshot:img})}/>
+      <AnalysePanel dayData={ydayData} dayLabel={fmtDay(yday)} cfg={cfg} apiKey={apiKey}/>
+      {MEALS.map(m=>{const onSave=data=>{const nm={...day.meals||{}};nm[m.id]=data;upDay({meals:nm});};const onDel=()=>{const ms={...day.meals||{}};delete ms[m.id];upDay({meals:ms});};return <MealBlock key={m.id} meal={m} saved={(day.meals&&day.meals[m.id])||null} onSave={onSave} onDelete={onDel} cfg={cfg} curve={day.dexcomCurve||null} apiKey={apiKey}/>;  })}
+      <CorrectifBlock entries={day.correctifs||[]} onAdd={e=>upDay({correctifs:[...(day.correctifs||[]),e]})} onDelete={id=>upDay({correctifs:(day.correctifs||[]).filter(x=>x.id!==id)})} cfg={cfg}/>
+    </div>)}
+
+    {tab==="report"&&(<div style={{padding:16,paddingBottom:40}}>
+      <div style={{background:"white",border:"1.5px solid "+C.border,borderRadius:14,padding:20,marginBottom:16}}>
+        <h2 style={{color:C.red,margin:"0 0 16px",fontSize:16,fontWeight:800}}>Rapport medical</h2>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+          <div><Lbl>Du</Lbl><input type="date" value={rFrom} onChange={e=>{setRFrom(e.target.value);setReportHtml(null);}} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,fontFamily:"inherit",color:C.text}}/></div>
+          <div><Lbl>Au</Lbl><input type="date" value={rTo} onChange={e=>{setRTo(e.target.value);setReportHtml(null);}} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,fontFamily:"inherit",color:C.text}}/></div>
+        </div>
+        <PBtn onClick={()=>setReportHtml(buildReport(allData,rFrom,rTo))} color={C.red} full>Generer le rapport</PBtn>
+      </div>
+      {reportHtml&&<div style={{borderRadius:14,overflow:"hidden",border:"1.5px solid "+C.border}}><iframe srcDoc={reportHtml} style={{width:"100%",height:"80vh",border:"none",display:"block"}} title="Rapport"/></div>}
+    </div>)}
+  </div>);
 }
