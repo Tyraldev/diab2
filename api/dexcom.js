@@ -35,7 +35,7 @@ export default async function handler(req, res) {
         }
       );
       const txt = await r.text();
-      if (!r.ok) return res.status(r.status).json({ error: "Dexcom login failed ("+r.status+"): " + txt.slice(0,200) });
+      if (!r.ok) return res.status(r.status).json({ error: "Login failed ("+r.status+"): " + txt.slice(0,200) });
       const sid = txt.replace(/^"|"$/g, "").trim();
       return res.status(200).json({ sessionId: sid });
     }
@@ -43,21 +43,33 @@ export default async function handler(req, res) {
     if (action === "readings") {
       const mins = minutes || 1440;
       const count = maxCount || 288;
-      // Try with sessionId in both URL and body
-      const url = `${base}/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId=${encodeURIComponent(sessionId)}&minutes=${mins}&maxCount=${count}`;
+
+      // Dexcom requires sessionId wrapped in quotes in URL
+      const sid = '"' + sessionId + '"';
+      const url = `${base}/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId=${encodeURIComponent(sid)}&minutes=${mins}&maxCount=${count}`;
+
       const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify("")
       });
       const txt = await r.text();
-      if (!r.ok) return res.status(r.status).json({ error: "Readings failed ("+r.status+"): " + txt.slice(0,300) });
-      if (!txt || txt.trim() === "") return res.status(200).json({ readings: [] });
+
+      if (!r.ok) return res.status(r.status).json({
+        error: "Readings failed ("+r.status+"): " + txt.slice(0,300)
+      });
+
+      if (!txt || txt.trim() === "" || txt.trim() === "null") {
+        return res.status(200).json({ readings: [], debug: "empty response" });
+      }
+
       try {
         const data = JSON.parse(txt);
-        return res.status(200).json({ readings: Array.isArray(data) ? data : [] });
+        return res.status(200).json({
+          readings: Array.isArray(data) ? data : [],
+          count: Array.isArray(data) ? data.length : 0
+        });
       } catch(e) {
-        return res.status(500).json({ error: "Parse error. Response: " + txt.slice(0, 300) });
+        return res.status(500).json({ error: "Parse error. Got: " + txt.slice(0, 200) });
       }
     }
 
