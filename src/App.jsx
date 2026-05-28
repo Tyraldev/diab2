@@ -853,7 +853,7 @@ export default function App(){
     <div style={{background:"white",borderBottom:"2px solid "+C.border,padding:"14px 16px",position:"sticky",top:0,zIndex:100,boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div><h1 style={{fontSize:18,fontWeight:800,color:C.red,margin:0}}>DiabeteTracker</h1><p style={{color:C.muted,fontSize:11,margin:0}}>{"Dexcom ONE+ | "+VERSION}</p></div>
-        <div style={{display:"flex",gap:6}}>{[["journal","Journal"],["report","Rapport"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"7px 14px",borderRadius:8,border:"2px solid "+(tab===k ? C.red : C.border),background:tab===k ? C.red : "white",color:tab===k ? "white" : C.muted,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>)}</div>
+        <div style={{display:"flex",gap:6}}>{[["journal","Journal"],["report","Rapport"],["params","Parametres"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"7px 14px",borderRadius:8,border:"2px solid "+(tab===k ? C.red : C.border),background:tab===k ? C.red : "white",color:tab===k ? "white" : C.muted,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>)}</div>
       </div>
     </div>
 
@@ -877,10 +877,6 @@ export default function App(){
         {(()=>{const vals=day.dexcomCurve.map(p=>parseFloat(p.value));const avg=(vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(2);const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);const above=Math.round(vals.filter(v=>v>cfg.tMax).length/vals.length*100);return(<div style={{display:"flex",gap:8,marginTop:8}}>{[["Moyenne",avg+" g/L",C.blue],["Temps cible",tir+"%",tir>=70 ? C.green : C.orange],["Au-dessus",above+"%",above>20 ? C.red : C.green]].map(([l,v,col])=><div key={l} style={{flex:1,textAlign:"center",background:col+"11",borderRadius:8,padding:"5px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontSize:13,fontWeight:700,color:col}}>{v}</div></div>)}</div>);})()} 
       </div>) : (<div style={{background:"#eff6ff",border:"1.5px dashed #93c5fd",borderRadius:12,padding:"14px 16px",marginBottom:12,textAlign:"center"}}><div style={{fontSize:13,color:C.blue,fontWeight:600}}>Aucune courbe Dexcom - importez le CSV</div></div>)}
       <AdaptiveBanner allData={allData} cfg={cfg} onApply={nc=>saveAll({...allData,cfg:nc})}/>
-      <ConfigPanel cfg={cfg} onSave={c=>saveAll({...allData,cfg:c})} allData={allData}/>
-      <DexcomLive allData={allData} saveAll={saveAll} cfg={cfg}/>
-      <ClarityImporter allData={allData} saveAll={saveAll}/>
-      <ScreenshotPanel value={(day&&day.screenshot)||null} onChange={img=>upDay({screenshot:img})}/>
       <AnalysePanel dayData={ydayData} dayLabel={fmtDay(yday)} cfg={cfg} apiKey={apiKey}/>
       {MEALS.map(m=>{const onSave=data=>{const nm={...day.meals||{}};nm[m.id]=data;upDay({meals:nm});};const onDel=()=>{const ms={...day.meals||{}};delete ms[m.id];upDay({meals:ms});};return <MealBlock key={m.id} meal={m} saved={(day.meals&&day.meals[m.id])||null} onSave={onSave} onDelete={onDel} cfg={cfg} curve={day.dexcomCurve||null} apiKey={apiKey}/>;  })}
       <CorrectifBlock entries={day.correctifs||[]} onAdd={e=>upDay({correctifs:[...(day.correctifs||[]),e]})} onDelete={id=>upDay({correctifs:(day.correctifs||[]).filter(x=>x.id!==id)})} cfg={cfg}/>
@@ -896,6 +892,16 @@ export default function App(){
         <PBtn onClick={()=>setReportHtml(buildReport(allData,rFrom,rTo))} color={C.red} full>Generer le rapport</PBtn>
       </div>
       {reportHtml&&<div style={{borderRadius:14,overflow:"hidden",border:"1.5px solid "+C.border}}><iframe srcDoc={reportHtml} style={{width:"100%",height:"80vh",border:"none",display:"block"}} title="Rapport"/></div>}
+    </div>)}
+
+    {tab==="params"&&(<div style={{padding:"16px 14px 40px"}}>
+      <h2 style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:16}}>Parametres</h2>
+      <ConfigPanel cfg={cfg} onSave={c=>saveAll({...allData,cfg:{...cfg,...c}})} allData={allData}/>
+      <div style={{borderRadius:14,border:"1.5px solid "+C.blue,background:"#eff6ff",marginBottom:12,padding:"14px 16px"}}>
+        <div style={{fontWeight:700,color:C.blue,fontSize:15,marginBottom:4}}>Connexion Dexcom</div>
+        <DexcomLive allData={allData} saveAll={saveAll} cfg={cfg}/>
+      </div>
+      <ClarityImporter allData={allData} saveAll={saveAll}/>
     </div>)}
   </div>);
 }
