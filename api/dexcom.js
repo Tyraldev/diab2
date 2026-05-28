@@ -1,11 +1,13 @@
-// Vercel Serverless Function - Proxy Dexcom Share API (CommonJS)
+// Vercel Serverless Function - Proxy Dexcom Share API
+export const config = { runtime: "nodejs" };
+
 const DEXCOM_BASE = {
   eu: "https://shareous1.dexcom.com",
   us: "https://share2.dexcom.com",
 };
 const APP_ID = "d8665ade-9673-4e27-9ff6-92db4ce13d13";
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -45,4 +47,4 @@ module.exports = async function handler(req, res) {
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
-};
+}
