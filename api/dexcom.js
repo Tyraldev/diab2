@@ -6,8 +6,28 @@ const DEXCOM_BASE = {
   eu: "https://shareous1.dexcom.com",
   us: "https://share2.dexcom.com",
 };
-const APP_ID = "d8665ade-9673-4e27-9ff6-92db4ce13d13";
+
+// Try multiple app IDs - ONE+ may require a different one
+const APP_IDS = [
+  "d8665ade-9673-4e27-9ff6-92db4ce13d13", // Dexcom Share iOS
+  "d89443d2-327c-4a6f-89e5-496bbb0317db", // Dexcom Share Android
+  "28b4cdca-b6d5-4ca2-b7d2-2cc1b9fb7d23", // Dexcom G5 mobile
+];
+
 const NULL_UUID = "00000000-0000-0000-0000-000000000000";
+
+async function tryLogin(base, username, password, appId, endpoint) {
+  const r = await fetch(`${base}/ShareWebServices/Services/General/${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Accept": "application/json" },
+    body: JSON.stringify({ accountName: username, password, applicationId: appId }),
+  });
+  const txt = await r.text();
+  if (!r.ok) return null;
+  const sid = txt.replace(/^"|"$/g, "").trim();
+  if (sid === NULL_UUID || sid === "" || sid.length < 10) return null;
+  return sid;
+}
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -27,28 +47,39 @@ export default async function handler(req, res) {
 
   try {
     if (action === "login") {
-      const r = await fetch(
-        `${base}/ShareWebServices/Services/General/LoginPublisherAccountByName`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "Accept": "application/json" },
-          body: JSON.stringify({ accountName: username, password, applicationId: APP_ID }),
-        }
-      );
-      const txt = await r.text();
-      if (!r.ok) return res.status(r.status).json({ error: "Login failed ("+r.status+"): " + txt.slice(0,200) });
-      const sid = txt.replace(/^"|"$/g, "").trim();
-      // Null UUID = wrong credentials
-      if (sid === NULL_UUID || sid === "") {
-        return res.status(401).json({ error: "Identifiants incorrects. Verifiez votre email et mot de passe Dexcom." });
+      // Try multiple endpoints and app IDs
+      const attempts = [
+        { endpoint: "LoginPublisherAccountByName", appId: APP_IDS[0] },
+        { endpoint: "LoginAccountByName",          appId: APP_IDS[0] },
+        { endpoint: "LoginPublisherAccountByName", appId: APP_IDS[1] },
+        { endpoint: "LoginAccountByName",          appId: APP_IDS[1] },
+        { endpoint: "LoginPublisherAccountByName", appId: APP_IDS[2] },
+        { endpoint: "LoginAccountByName",          appId: APP_IDS[2] },
+      ];
+
+      let sid = null;
+      let usedAttempt = null;
+      for (const attempt of attempts) {
+        sid = await tryLogin(base, username, password, attempt.appId, attempt.endpoint);
+        if (sid) { usedAttempt = attempt; break; }
       }
-      return res.status(200).json({ sessionId: sid });
+
+      if (!sid) {
+        return res.status(401).json({
+          error: "Identifiants incorrects ou compte Dexcom ONE+ incompatible avec l API Share. Verifiez votre email et mot de passe."
+        });
+      }
+
+      return res.status(200).json({
+        sessionId: sid,
+        method: usedAttempt.endpoint,
+        appId: usedAttempt.appId
+      });
     }
 
     if (action === "readings") {
       const mins = minutes || 1440;
       const count = maxCount || 288;
-      // Pass sessionId directly without quotes
       const url = `${base}/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId=${sessionId}&minutes=${mins}&maxCount=${count}`;
       const r = await fetch(url, {
         method: "POST",
