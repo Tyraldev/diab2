@@ -214,7 +214,7 @@ async function aiGlucidesPhoto(photoB64, desc, apiKey) {
       })
     });
   } catch(e) { throw new Error("Connexion impossible: "+e.message); }
-  if(!res.ok){let m="";try{const ed=await res.json();m=(ed.error&&ed.error.message)||"";}catch(_){}throw new Error("Erreur API "+res.status+(m " - "+m:""));}
+  if(!res.ok){let m="";try{const ed=await res.json();m=(ed.error&&ed.error.message)||"";}catch(_){}throw new Error("Erreur API "+res.status+(m ? " - "+m:""));}
   let d; try{d=await res.json();}catch(e){throw new Error("Reponse illisible");}
   const r=parseJSON(((d.content&&d.content.find(c=>c.type==="text"))||{}).text||"{}");
   if(!r||!r.total) throw new Error("Reponse incomplete. Reessayez.");
@@ -306,7 +306,7 @@ Diabetologue expert. Analyse et reponds en JSON brut valide avec ces champs:
       body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1000,
         messages:[{role:"user",content:lines.join("\n")+instr}]})});
   } catch(e){throw new Error("Connexion impossible: "+e.message);}
-  if(!res.ok){let m="";try{const ed=await res.json();m=(ed.error&&ed.error.message)||"";}catch(_){}throw new Error("Erreur API "+res.status+(m " - "+m:""));}
+  if(!res.ok){let m="";try{const ed=await res.json();m=(ed.error&&ed.error.message)||"";}catch(_){}throw new Error("Erreur API "+res.status+(m ? " - "+m:""));}
   let d;try{d=await res.json();}catch(e){throw new Error("Reponse illisible");}
   return parseJSON(((d.content&&d.content.find(c=>c.type==="text"))||{}).text||"{}");
 }
