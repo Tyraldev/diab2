@@ -3,7 +3,7 @@ const qs = require("querystring");
 
 const CLIENT_ID = process.env.DEXCOM_CLIENT_ID;
 const CLIENT_SECRET = process.env.DEXCOM_CLIENT_SECRET;
-const REDIRECT_URI = process.env.DEXCOM_REDIRECT_URI || "https://diab2-one.vercel.app";
+const REDIRECT_URI = process.env.DEXCOM_REDIRECT_URI || "https://diab2-one.vercel.app/";
 const HOST = "sandbox-api.dexcom.com";
 
 function post(path, data) {
