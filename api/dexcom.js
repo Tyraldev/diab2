@@ -1,4 +1,3 @@
-// Vercel Serverless Function - Proxy Dexcom Share API
 export const config = {
   api: { bodyParser: { sizeLimit: "1mb" } }
 };
@@ -16,7 +15,6 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  // Parse body explicitly in case Vercel doesn't auto-parse
   let body = req.body;
   if (typeof body === "string") {
     try { body = JSON.parse(body); } catch(e) { return res.status(400).json({ error: "Invalid JSON body" }); }
@@ -37,25 +35,29 @@ export default async function handler(req, res) {
         }
       );
       const txt = await r.text();
-      if (!r.ok) return res.status(r.status).json({ error: "Dexcom login failed: " + txt });
-      // Dexcom returns a quoted string like "abc-123" - strip quotes
-      const sid = txt.replace(/^"|"$/g, "");
+      if (!r.ok) return res.status(r.status).json({ error: "Dexcom login failed ("+r.status+"): " + txt.slice(0,200) });
+      const sid = txt.replace(/^"|"$/g, "").trim();
       return res.status(200).json({ sessionId: sid });
     }
 
     if (action === "readings") {
       const mins = minutes || 1440;
       const count = maxCount || 288;
-      const r = await fetch(
-        `${base}/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId=${sessionId}&minutes=${mins}&maxCount=${count}`,
-        { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" } }
-      );
+      // Try with sessionId in both URL and body
+      const url = `${base}/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId=${encodeURIComponent(sessionId)}&minutes=${mins}&maxCount=${count}`;
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify("")
+      });
       const txt = await r.text();
-      if (!r.ok) return res.status(r.status).json({ error: "Dexcom readings failed: " + txt });
+      if (!r.ok) return res.status(r.status).json({ error: "Readings failed ("+r.status+"): " + txt.slice(0,300) });
+      if (!txt || txt.trim() === "") return res.status(200).json({ readings: [] });
       try {
-        return res.status(200).json({ readings: JSON.parse(txt) });
+        const data = JSON.parse(txt);
+        return res.status(200).json({ readings: Array.isArray(data) ? data : [] });
       } catch(e) {
-        return res.status(500).json({ error: "Invalid readings response: " + txt.slice(0, 100) });
+        return res.status(500).json({ error: "Parse error. Response: " + txt.slice(0, 300) });
       }
     }
 
