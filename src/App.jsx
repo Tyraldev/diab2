@@ -481,127 +481,115 @@ function egvsToPoints(egvs){
 
 function DexcomLive({allData,saveAll,cfg}){
   const [open,setOpen]=useState(false);
-  const [username,setUsername]=useState((allData.dexcomCreds&&allData.dexcomCreds.username)||"");
-  const [password,setPassword]=useState((allData.dexcomCreds&&allData.dexcomCreds.password)||"");
-  const [region,setRegion]=useState((allData.dexcomCreds&&allData.dexcomCreds.region)||"eu");
   const [status,setStatus]=useState(null);
   const [loading,setLoading]=useState(false);
   const [lastSync,setLastSync]=useState(null);
   const intervalRef=useRef(null);
 
-  const doSync=async(creds)=>{
+  const creds=allData.dexcomOAuth||null;
+  const isConnected=!!(creds&&creds.accessToken);
+
+  const doSync=async(tokens)=>{
     try{
-      const readings=await dexcomReadings(creds.sessionId,creds.region||"eu");
-      const points=dexcomToPoints(readings);
+      let tkns=tokens;
+      if(tkns.expiresAt&&Date.now()>tkns.expiresAt-60000){
+        const refreshed=await dexcomRefreshAPI(tkns.refreshToken);
+        tkns={...tkns,...refreshed};
+        saveAll({...allData,dexcomOAuth:tkns});
+      }
+      const egvs=await dexcomReadingsAPI(tkns.accessToken);
+      const points=egvsToPoints(egvs);
       const byDay=groupByDay(points);
       const newDays={...(allData.days||{})};
       Object.keys(byDay).forEach(dk=>{newDays[dk]={...(newDays[dk]||{}),dexcomCurve:byDay[dk]};});
-      saveAll({...allData,days:newDays});
+      saveAll({...allData,days:newDays,dexcomOAuth:tkns});
       setLastSync(new Date());
       setStatus({type:"ok",msg:points.length+" mesures synchronisees"});
     }catch(e){
-      if(e.message&&(e.message.includes("401")||e.message.includes("SessionId"))){
-        try{const newSid=await dexcomLogin(creds.username,creds.password,creds.region||"eu");
-          const nc={...creds,sessionId:newSid};
-          saveAll({...allData,dexcomCreds:nc});
-          await doSync(nc);
-        }catch(e2){setStatus({type:"error",msg:"Session expiree. Reconnectez-vous."});}
+      if(e.message==="TOKEN_EXPIRED"){
+        try{const refreshed=await dexcomRefreshAPI(tokens.refreshToken);const tkns={...tokens,...refreshed};saveAll({...allData,dexcomOAuth:tkns});await doSync(tkns);}
+        catch(e2){setStatus({type:"error",msg:"Session expiree - reconnectez-vous"});}
       }else{setStatus({type:"error",msg:"Erreur: "+e.message});}
     }
   };
 
   useEffect(()=>{
-    if(allData.dexcomCreds&&allData.dexcomCreds.sessionId){
-      doSync(allData.dexcomCreds);
-      intervalRef.current=setInterval(()=>doSync(allData.dexcomCreds),5*60*1000);
+    const params=new URLSearchParams(window.location.search);
+    const access=params.get("dexcom_access");
+    const refresh=params.get("dexcom_refresh");
+    const expires=params.get("dexcom_expires");
+    const error=params.get("dexcom_error");
+    if(error){setStatus({type:"error",msg:"Erreur Dexcom: "+decodeURIComponent(error)});window.history.replaceState({},"","/");}
+    if(access&&refresh){
+      const tkns={accessToken:access,refreshToken:refresh,expiresAt:parseInt(expires)||0};
+      saveAll({...allData,dexcomOAuth:tkns});
+      window.history.replaceState({},"","/");
+      setStatus({type:"ok",msg:"Compte Dexcom connecte ! Synchronisation en cours..."});
+      setTimeout(()=>doSync(tkns),1000);
+    }
+  },[]);
+
+  useEffect(()=>{
+    if(creds&&creds.accessToken){
+      doSync(creds);
+      intervalRef.current=setInterval(()=>doSync(creds),5*60*1000);
     }
     return()=>{if(intervalRef.current)clearInterval(intervalRef.current);};
   },[]);
 
   const connect=async()=>{
-    if(!username||!password)return;
-    setLoading(true);setStatus({type:"info",msg:"Connexion aux serveurs Dexcom..."});
-    try{
-      const sid=await dexcomLogin(username,password,region);
-      const creds={username,password,region,sessionId:sid};
-      setStatus({type:"info",msg:"Recuperation des donnees..."});
-      const readings=await dexcomReadings(sid,region);
-      const points=dexcomToPoints(readings);
-      const byDay=groupByDay(points);
-      const newDays={...(allData.days||{})};
-      Object.keys(byDay).forEach(dk=>{newDays[dk]={...(newDays[dk]||{}),dexcomCurve:byDay[dk]};});
-      saveAll({...allData,days:newDays,dexcomCreds:creds});
-      setLastSync(new Date());
-      const dc=Object.keys(byDay).length;
-      setStatus({type:"ok",msg:points.length+" mesures sur "+dc+" jours. Synchro toutes les 5 min."});
-      setOpen(false);
-      if(intervalRef.current)clearInterval(intervalRef.current);
-      intervalRef.current=setInterval(()=>doSync(creds),5*60*1000);
-    }catch(e){setStatus({type:"error",msg:"Erreur: "+e.message});}
-    setLoading(false);
+    setLoading(true);
+    try{const url=await dexcomGetAuthUrl();window.location.href=url;}
+    catch(e){setStatus({type:"error",msg:"Erreur: "+e.message});setLoading(false);}
   };
 
   const disconnect=()=>{
     if(intervalRef.current)clearInterval(intervalRef.current);
-    const nd={...allData};delete nd.dexcomCreds;
-    saveAll(nd);setStatus(null);setLastSync(null);setUsername("");setPassword("");
+    const nd={...allData};delete nd.dexcomOAuth;
+    saveAll(nd);setStatus(null);setLastSync(null);
   };
 
-  const isConnected=!!(allData.dexcomCreds&&allData.dexcomCreds.sessionId);
   const todayCurve=allData.days&&allData.days[TODAY()]&&allData.days[TODAY()].dexcomCurve;
   const lastGly=todayCurve&&todayCurve.length>0 ? todayCurve[todayCurve.length-1] : null;
-  const trendArrow={"Flat":"->","FortyFiveUp":"/->","SingleUp":"^","DoubleUp":"^^","FortyFiveDown":"\\->","SingleDown":"v","DoubleDown":"vv","NotComputable":"?","RateOutOfRange":"!"};
+  const trendArrow={"flat":"->","fortyfiveup":"/->","singleup":"^","doubleup":"^^","fortyfivedown":"\->","singledown":"v","doubledown":"vv"};
 
   return(<div style={{borderRadius:14,border:"2px solid "+(isConnected ? C.green : C.blue),background:isConnected ? "#f0fdf4" : "#eff6ff",marginBottom:12}}>
     <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span style={{background:isConnected ? C.green : C.blue,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>{isConnected ? "LIVE" : "Dexcom"}</span>
         <div>
-          <div style={{fontWeight:700,color:C.text,fontSize:15}}>Dexcom Share - Temps reel</div>
-          <div style={{fontSize:12,color:C.muted}}>{isConnected ? (lastGly ? "Derniere valeur: "+lastGly.value+" g/L "+(trendArrow[lastGly.trend]||"")+(lastSync ? " - sync "+lastSync.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}) : "") : "Connecte") : "Connexion automatique a votre capteur"}</div>
+          <div style={{fontWeight:700,color:C.text,fontSize:15}}>Dexcom ONE+ - Temps reel</div>
+          <div style={{fontSize:12,color:C.muted}}>{isConnected ? (lastGly ? "Derniere valeur: "+lastGly.value+" g/L "+(trendArrow[lastGly.trend.toLowerCase()]||"")+(lastSync ? " - sync "+lastSync.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}) : "") : "Connecte - en attente") : "Connexion via compte Dexcom officiel"}</div>
         </div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
         {isConnected&&lastGly&&<span style={{fontWeight:800,fontSize:18,color:glyColor(lastGly.value,cfg)}}>{lastGly.value+" g/L"}</span>}
-        {isConnected&&<button onClick={e=>{e.stopPropagation();doSync(allData.dexcomCreds);}} style={{padding:"4px 10px",background:C.green,color:"white",border:"none",borderRadius:6,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Sync</button>}
+        {isConnected&&<button onClick={e=>{e.stopPropagation();doSync(creds);}} style={{padding:"4px 10px",background:C.green,color:"white",border:"none",borderRadius:6,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Sync</button>}
         <span style={{color:C.muted}}>{open ? "^" : "v"}</span>
       </div>
     </div>
     {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid "+(isConnected ? "#86efac" : "#bfdbfe")}}>
       {!isConnected ? (<div>
-        <div style={{background:"#dbeafe",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.blue}}>
-          <strong>Prerequis :</strong> Activez le partage dans l app Dexcom (Menu - Partager - activer)<br/>
-          Utilisez les memes identifiants que votre compte Dexcom.
+        <div style={{background:"#dbeafe",borderRadius:8,padding:"10px 12px",marginBottom:14,fontSize:12,color:C.blue}}>
+          Connexion securisee via le site officiel Dexcom.<br/>
+          Vous serez redirige vers Dexcom pour autoriser l acces.
         </div>
-        <div style={{marginBottom:10}}>
-          <Lbl>Region</Lbl>
-          <div style={{display:"flex",gap:8}}>
-            {[["eu","Europe (EU)"],["us","Etats-Unis (US)"]].map(([id,label])=>(<button key={id} onClick={()=>setRegion(id)} style={{flex:1,padding:"8px",border:"2px solid "+(region===id ? C.blue : C.border),borderRadius:8,background:region===id ? C.blue : "white",color:region===id ? "white" : C.muted,cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>{label}</button>))}
-          </div>
-        </div>
-        <div style={{marginBottom:10}}><Lbl>Identifiant Dexcom</Lbl><TInput value={username} onChange={setUsername} placeholder="Email ou nom utilisateur"/></div>
-        <div style={{marginBottom:12}}>
-          <Lbl>Mot de passe</Lbl>
-          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Mot de passe" style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}}/>
-        </div>
-        <div style={{background:"#fef2f2",border:"1px solid #fca5a5",borderRadius:8,padding:"8px 10px",marginBottom:12,fontSize:11,color:C.red}}>Identifiants stockes uniquement sur votre appareil. Jamais envoyes ailleurs qu a Dexcom.</div>
-        <PBtn onClick={connect} disabled={loading||!username||!password} color={C.blue} full>{loading ? "Connexion..." : "Se connecter a Dexcom Share"}</PBtn>
+        <PBtn onClick={connect} disabled={loading} color={C.blue} full>{loading ? "Redirection..." : "Se connecter avec Dexcom"}</PBtn>
       </div>) : (<div>
         <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.green}}>
-          <strong>Connecte :</strong> {allData.dexcomCreds.username}<br/>
-          <strong>Region :</strong> {allData.dexcomCreds.region==="eu" ? "Europe" : "USA"}<br/>
-          <strong>Synchro auto :</strong> toutes les 5 minutes
+          <strong>Connecte a Dexcom ONE+</strong><br/>Synchro automatique toutes les 5 minutes.
         </div>
         {lastSync&&<div style={{fontSize:11,color:C.muted,marginBottom:10}}>{"Derniere synchro: "+lastSync.toLocaleString("fr-FR")}</div>}
         <div style={{display:"flex",gap:8}}>
-          <PBtn onClick={()=>doSync(allData.dexcomCreds)} color={C.green} full>Synchroniser maintenant</PBtn>
+          <PBtn onClick={()=>doSync(creds)} color={C.green} full>Synchroniser maintenant</PBtn>
           <OBtn onClick={disconnect} color={C.red} small>Deconnecter</OBtn>
         </div>
       </div>)}
-      {status&&<div style={{marginTop:10,padding:"8px 12px",borderRadius:8,fontSize:13,background:status.type==="error" ? "#fef2f2" : status.type==="ok" ? "#f0fdf4" : "#f0f9ff",color:status.type==="error" ? C.red : status.type==="ok" ? C.green : C.blue,border:"1px solid "+(status.type==="error" ? "#fca5a5" : status.type==="ok" ? "#86efac" : "#93c5fd")}}>{status.msg}</div>}
+      {status&&<div style={{marginTop:10,padding:"8px 12px",borderRadius:8,fontSize:13,background:status.type==="error" ? "#fef2f2" : "#f0fdf4",color:status.type==="error" ? C.red : C.green,border:"1px solid "+(status.type==="error" ? "#fca5a5" : "#86efac")}}>{status.msg}</div>}
     </div>)}
   </div>);
 }
+
 
 function ClarityImporter({allData,saveAll}){
   const [open,setOpen]=useState(false);
