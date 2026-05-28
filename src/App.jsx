@@ -451,11 +451,11 @@ function ConfigPanel({cfg,onSave,allData}){
 }
 
 // -- DEXCOM OFFICIAL API (OAuth) --
-async function dexcomGetAuthUrl(){
-  const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"auth_url"})});
+async function dexcomExchangeCode(code){
+  const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"exchange_code",code})});
   const d=await r.json();
   if(d.error)throw new Error(d.error);
-  return d.url;
+  return d;
 }
 async function dexcomReadingsAPI(accessToken){
   const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"readings",accessToken})});
@@ -515,17 +515,23 @@ function DexcomLive({allData,saveAll,cfg}){
 
   useEffect(()=>{
     const params=new URLSearchParams(window.location.search);
-    const access=params.get("dexcom_access");
-    const refresh=params.get("dexcom_refresh");
-    const expires=params.get("dexcom_expires");
-    const error=params.get("dexcom_error");
-    if(error){setStatus({type:"error",msg:"Erreur Dexcom: "+decodeURIComponent(error)});window.history.replaceState({},"","/");}
-    if(access&&refresh){
-      const tkns={accessToken:access,refreshToken:refresh,expiresAt:parseInt(expires)||0};
-      saveAll({...allData,dexcomOAuth:tkns});
+    const code=params.get("code");
+    const error=params.get("error");
+    if(error){
+      setStatus({type:"error",msg:"Erreur Dexcom: "+error});
       window.history.replaceState({},"","/");
-      setStatus({type:"ok",msg:"Compte Dexcom connecte ! Synchronisation en cours..."});
-      setTimeout(()=>doSync(tkns),1000);
+      return;
+    }
+    if(code){
+      window.history.replaceState({},"","/");
+      setStatus({type:"info",msg:"Connexion en cours..."});
+      dexcomExchangeCode(code).then(tkns=>{
+        saveAll({...allData,dexcomOAuth:tkns});
+        setStatus({type:"ok",msg:"Connecte ! Synchronisation en cours..."});
+        setTimeout(()=>doSync(tkns),500);
+      }).catch(e=>{
+        setStatus({type:"error",msg:"Erreur echange: "+e.message});
+      });
     }
   },[]);
 
@@ -573,7 +579,7 @@ function DexcomLive({allData,saveAll,cfg}){
           Connexion securisee via le site officiel Dexcom.<br/>
           Vous serez redirige vers Dexcom pour autoriser l acces.
         </div>
-        <a href={"https://sandbox-api.dexcom.com/v2/oauth2/login?client_id=imBRNfG7CkjAFA0pbdgrXnxUZlIOvNw6&redirect_uri="+encodeURIComponent("https://diab2.vercel.app/api/callback")+"&response_type=code&scope=offline_access"} onClick={e=>e.stopPropagation()} style={{display:"block",width:"100%",padding:"10px 18px",background:C.blue,color:"white",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",boxSizing:"border-box"}}>Se connecter avec Dexcom</a>
+        <a href={"https://sandbox-api.dexcom.com/v2/oauth2/login?client_id=imBRNfG7CkjAFA0pbdgrXnxUZlIOvNw6&redirect_uri="+encodeURIComponent("https://diab2.vercel.app")+"&response_type=code&scope=offline_access"} onClick={e=>e.stopPropagation()} style={{display:"block",width:"100%",padding:"10px 18px",background:C.blue,color:"white",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit",textAlign:"center",textDecoration:"none",boxSizing:"border-box"}}>Se connecter avec Dexcom</a>
       </div>) : (<div>
         <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.green}}>
           <strong>Connecte a Dexcom ONE+</strong><br/>Synchro automatique toutes les 5 minutes.
