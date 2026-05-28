@@ -275,7 +275,7 @@ async function aiAnalyse(dayCtx, cfg, apiKey) {
   const nightEvents = correctifs.filter(c=>{const h=parseInt((c.time||"12").split(":")[0]);return h>=22||h<=7;});
   const firstMealGly = (() => {
     const first=MEALS.map(m=>dayCtx.meals&&dayCtx.meals[m.id]).filter(Boolean).sort((a,b)=>a.time.localeCompare(b.time))[0];
-    return first (first.glyManuelle||first.glycemieAuto||first.glyEffective):null;
+    return first ? (first.glyManuelle||first.glycemieAuto||first.glyEffective):null;
   })();
   const dinner = dayCtx.meals && dayCtx.meals["dinner"];
   lines.push("","=== ANALYSE NOCTURNE ===");
@@ -287,7 +287,7 @@ async function aiAnalyse(dayCtx, cfg, apiKey) {
     const avg=(vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(2);
     const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);
     const nv=dayCtx.dexcomCurve.filter(p=>{const h=parseInt(p.time.split(":")[0]);return h>=22||h<=7;}).map(p=>parseFloat(p.value));
-    const na=nv.length>0 (nv.reduce((s,v)=>s+v,0)/nv.length).toFixed(2):null;
+    const na=nv.length>0 ? (nv.reduce((s,v)=>s+v,0)/nv.length).toFixed(2):null;
     lines.push("Courbe Dexcom: moy="+avg+"g/L tir="+tir+"%"+(na ? " moy_nuit="+na+"g/L":""));
   }
   const instr = "
@@ -529,8 +529,8 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}){
   const glyEff=glyMan parseFloat(glyMan):(glyAuto parseFloat(glyAuto.value):null);
   const suggest=(cfg&&(glucides||glyEff)) ()=>{
     const g=parseFloat(glucides)||0;
-    const br=g>0 (g/cfg.ratioIC):0;
-    const bc=glyEff&&glyEff>cfg.ciblePre ((glyEff-cfg.ciblePre)/cfg.fc):0;
+    const br=g>0 ? (g/cfg.ratioIC):0;
+    const bc=glyEff&&glyEff>cfg.ciblePre ? ((glyEff-cfg.ciblePre)/cfg.fc):0;
     return {br:br.toFixed(1),bc:bc.toFixed(1),total:(br+bc).toFixed(1)};
   }:null;
   const sug=suggest suggest():null;
@@ -589,7 +589,7 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}){
         </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 50px",gap:10,alignItems:"end",marginBottom:4}}>
-        <div><Lbl>Glucides (g)</Lbl><TInput type="number" value={glucides} onChange={setGlucides} placeholder="0" min="0"/></div>
+        <div><Lbl>Glucides ? (g)</Lbl><TInput type="number" value={glucides} onChange={setGlucides} placeholder="0" min="0"/></div>
         <button onClick={()=>setShowAI(!showAI)} style={{padding:"9px 10px",background:showAI ? "#fff7ed":"white",color:C.orange,border:"1.5px solid "+C.orange,borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",width:"100%"}}>IA</button>
       </div>
       {showAI&&<GlucidesAI initDesc={desc} onAccept={v=>{setGlucides(String(v));setShowAI(false);}} apiKey={apiKey} photo={photo}/>}
@@ -647,7 +647,7 @@ function LentePanel({entries,onAdd,onDelete}){
       </div>))}
       <div style={{background:"white",borderRadius:10,padding:14,border:"1px solid "+C.border}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-          <div><Lbl>Unites (UI)</Lbl><TInput type="number" value={units} onChange={setUnits} min="0" step="0.5" placeholder="0"/></div>
+          <div><Lbl>Unites ? (UI)</Lbl><TInput type="number" value={units} onChange={setUnits} min="0" step="0.5" placeholder="0"/></div>
           <div><Lbl>Heure</Lbl><TTime value={time} onChange={setTime}/></div>
         </div>
         <div style={{marginBottom:10}}><Lbl>Note</Lbl><TInput value={note} onChange={setNote} placeholder="Site, moment..."/></div>
@@ -739,7 +739,7 @@ function ConfigPanel({cfg,onSave,allData}){
         <div style={{marginTop:12,background:"#eff6ff",borderRadius:10,padding:"12px 14px"}}>
           <div style={{fontWeight:700,color:C.blue,fontSize:12,marginBottom:10,textTransform:"uppercase"}}>Insuline lente - dose fixe</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:6}}>
-            <div><Lbl>Dose (UI)</Lbl><TInput type="number" value={lente} onChange={setLente} placeholder="ex: 20" step="0.5"/></div>
+            <div><Lbl>Dose ? (UI)</Lbl><TInput type="number" value={lente} onChange={setLente} placeholder="ex: 20" step="0.5"/></div>
             <div><Lbl>Heure</Lbl><TTime value={lenteHeure} onChange={setLenteHeure}/></div>
             <div><Lbl>Nom</Lbl><TInput value={lenteNom} onChange={setLenteNom} placeholder="Lantus..."/></div>
           </div>
@@ -1362,7 +1362,7 @@ function CorrectifBlock({ entries, onAdd, onDelete, cfg }) {
           </div>
           <div style={{display:"grid",gridTemplateColumns:"100px 1fr",gap:10,marginBottom:10}}>
             <div><Lbl>Heure</Lbl><TTime value={time} onChange={setTime}/></div>
-            <div><Lbl>Glycemie (g/L)</Lbl><TInput type="number" value={gly} onChange={setGly} placeholder="ex: 2.10" min="0" step="0.01"/></div>
+            <div><Lbl>Glycemie ? (g/L)</Lbl><TInput type="number" value={gly} onChange={setGly} placeholder="ex: 2.10" min="0" step="0.01"/></div>
           </div>
           {gly&&(<div style={{padding:"8px 12px",background:glyColor(gly,cfg)+"11",border:"1px solid "+glyColor(gly,cfg),borderRadius:8,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <span style={{fontSize:12,color:glyColor(gly,cfg),fontWeight:700}}>{glyLabel(gly,cfg)}</span>
@@ -1417,7 +1417,7 @@ function ExportImport({ allData, saveAll }) {
         PC: importez CSV Dexcom puis Exportez. iPhone: Importez le fichier JSON.
       </div>
       <div style={{display:"flex",gap:8}}>
-        <PBtn onClick={doExport} color={C.blue} full>Exporter (.json)</PBtn>
+        <PBtn onClick={doExport} color={C.blue} full>Exporter ? (.json)</PBtn>
         <button onClick={()=>ref.current.click()} disabled={importing} style={{padding:"10px 14px",background:"white",color:C.green,border:"2px solid "+C.green,borderRadius:10,fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{importing?"...":"Importer"}</button>
         <input ref={ref} type="file" accept=".json" style={{display:"none"}} onChange={e=>{if(e.target.files[0])doImport(e.target.files[0]);}}/>
       </div>
@@ -1741,7 +1741,7 @@ export default function App(){
       {!apiKey&&(<div style={{background:"#fef2f2",border:"1.5px solid #fca5a5",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:C.red}}>
         <strong>Cle API manquante</strong> - Ouvrez Mes parametres pour activer IA et estimation photo.
       </div>)}
-      {day.dexcomCurve&&day.dexcomCurve.length>0 (<div style={{background:"white",border:"1.5px solid #93c5fd",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+      {day.dexcomCurve&&day.dexcomCurve.length>0 ? (<div style={{background:"white",border:"1.5px solid #93c5fd",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
           <span style={{fontWeight:700,fontSize:13,color:C.blue}}>Courbe Dexcom</span>
           <span style={{fontSize:11,color:C.muted}}>{day.dexcomCurve.length+" pts"}</span>
