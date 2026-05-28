@@ -450,28 +450,6 @@ function ConfigPanel({cfg,onSave,allData}){
   </div>);
 }
 
-//    DEXCOM SHARE API                                                          
-function parseDexcomDate(wt){const m=String(wt).match(/Date\((\d+)/);if(!m)return null;return new Date(parseInt(m[1]));}
-function parseDexcomValue(val){const n=parseFloat(val);if(isNaN(n))return null;return(n/100).toFixed(2);}
-async function dexcomLogin(username,password,region){
-  const res=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"login",region,username,password})});
-  const d=await res.json();
-  if(!res.ok||d.error)throw new Error(d.error||"Connexion echouee");
-  return String(d.sessionId).replace(/^"|"$/g,"");
-}
-async function dexcomReadings(sessionId,region,minutes,maxCount){
-  const res=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"readings",region,sessionId,minutes:minutes||1440,maxCount:maxCount||288})});
-  const d=await res.json();
-  if(!res.ok||d.error)throw new Error(d.error||"Lecture echouee");
-  return d.readings||[];
-}
-function dexcomToPoints(readings){
-  return readings.map(r=>{const dt=parseDexcomDate(r.WT);if(!dt)return null;const val=parseDexcomValue(r.Value);if(!val)return null;return{time:dt.toTimeString().slice(0,5),value:val,ts:dt.toISOString(),trend:r.Trend||""};}).filter(Boolean).sort((a,b)=>a.ts.localeCompare(b.ts));
-}
-function groupByDay(points){const byDay={};points.forEach(p=>{const dk=p.ts.slice(0,10);if(!byDay[dk])byDay[dk]=[];byDay[dk].push(p);});return byDay;}
-
 // -- DEXCOM OFFICIAL API (OAuth) --
 async function dexcomGetAuthUrl(){
   const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"auth_url"})});
