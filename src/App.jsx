@@ -148,7 +148,7 @@ function estimateCarbsLocal(text) {
       if (gM && (food.unit === "portion" || food.unit === "g")) {
         // estimate from raw weight - use g value as per-100g rough
         const grams = parseFloat(gM[1]);
-        carbs = Math.round(food.g * (grams / 100) * (food.unit === "portion" ? (100/150) : 1));
+        carbs = Math.round(food.g * (grams / 100) * (food.unit === "portion" (100/150) : 1));
         items.push({ name: food.label + " (" + grams + "g)", glucides: carbs });
       } else {
         carbs = Math.round(food.g * qty);
@@ -254,8 +254,8 @@ async function aiGlucides(desc, apiKey) {
 async function aiAnalyse(dayCtx, cfg, apiKey) {
   const lines = [
     "=== PARAMETRES ACTUELS ===",
-    "Cible: "+cfg.tMin+"-"+cfg.tMax+" g/L | Ratio IC: 1UI/"+cfg.ratioIC+"g | FC: 1UI baisse de "+cfg.fc+" g/L | Cible pre-repas: "+cfg.ciblePre+" g/L",
-    "Insuline lente: "+(cfg.lenteHab||"non renseignee")+" UI a "+(cfg.lenteHeure||" ")+(cfg.lenteNom " ("+cfg.lenteNom+")":""),
+    "Cible: "+cfg.tMin+"-"+cfg.tMax+" g/L | Ratio IC: 1UI/"+cfg.ratioIC+"g | FC: 1UI baisse de ? "+cfg.fc+" g/L | Cible pre-repas: "+cfg.ciblePre+" g/L",
+    "Insuline lente: "+(cfg.lenteHab||"non renseignee")+" UI a "+(cfg.lenteHeure||" ")+(cfg.lenteNom ? " ("+cfg.lenteNom+")":""),
     "","=== JOURNEE: "+dayCtx.label+" ===",
   ];
   MEALS.forEach(m => {
@@ -265,12 +265,12 @@ async function aiAnalyse(dayCtx, cfg, apiKey) {
     const di = parseFloat(meal.insulineRapide||0)+parseFloat(meal.bolusCorrection||0);
     const g = parseFloat(meal.glucides)||0;
     const ideal = g>0 ? g/cfg.ratioIC + (gp&&parseFloat(gp)>cfg.ciblePre ? (parseFloat(gp)-cfg.ciblePre)/cfg.fc :0) : 0;
-    lines.push(m.label+"("+meal.time+"): glucides="+g+"g gly_avant="+(gp||" ")+"g/L dose_injectee="+di.toFixed(1)+"UI dose_ideale="+ideal.toFixed(1)+"UI ecart="+(di>0 Math.round((di-ideal)*10)/10:" ")+"UI");
+    lines.push(m.label+"("+meal.time+"): glucides="+g+"g gly_avant="+(gp||" ")+"g/L dose_injectee="+di.toFixed(1)+"UI dose_ideale="+ideal.toFixed(1)+"UI ecart="+(di>0 ? Math.round((di-ideal)*10)/10:" ")+"UI");
   });
   const correctifs = dayCtx.correctifs || [];
   if (correctifs.length > 0) {
     lines.push("","=== CORRECTIFS ===");
-    correctifs.forEach(c => lines.push(c.type.toUpperCase()+" "+c.time+": gly="+(c.gly||" ")+"g/L"+(c.units " bolus="+c.units+"UI":"")+(c.glucides " resucrage="+c.glucides+"g":"")+(c.note " "+c.note:"")));
+    correctifs.forEach(c => lines.push(c.type.toUpperCase()+" "+c.time+": gly="+(c.gly||" ")+"g/L"+(c.units ? " bolus="+c.units+"UI":"")+(c.glucides ? " resucrage="+c.glucides+"g":"")+(c.note ? " "+c.note:"")));
   }
   const nightEvents = correctifs.filter(c=>{const h=parseInt((c.time||"12").split(":")[0]);return h>=22||h<=7;});
   const firstMealGly = (() => {
@@ -280,7 +280,7 @@ async function aiAnalyse(dayCtx, cfg, apiKey) {
   const dinner = dayCtx.meals && dayCtx.meals["dinner"];
   lines.push("","=== ANALYSE NOCTURNE ===");
   if (dinner) lines.push("Diner: glucides="+(dinner.glucides||" ")+"g gly_avant="+(dinner.glyManuelle||dinner.glycemieAuto||" ")+"g/L dose="+(parseFloat(dinner.insulineRapide||0)+parseFloat(dinner.bolusCorrection||0)).toFixed(1)+"UI");
-  nightEvents.forEach(e=>lines.push("Nuit "+e.time+": "+e.type+" gly="+(e.gly||" ")+"g/L"+(e.units " bolus="+e.units+"UI":"")+(e.glucides " resucrage="+e.glucides+"g":"")+(e.note " "+e.note:"")));
+  nightEvents.forEach(e=>lines.push("Nuit "+e.time+": "+e.type+" gly="+(e.gly||" ")+"g/L"+(e.units ? " bolus="+e.units+"UI":"")+(e.glucides ? " resucrage="+e.glucides+"g":"")+(e.note ? " "+e.note:"")));
   if (firstMealGly) lines.push("Glycemie lever (premier repas): "+firstMealGly+"g/L - indicateur qualite insuline lente");
   if (dayCtx.dexcomCurve && dayCtx.dexcomCurve.length > 0) {
     const vals=dayCtx.dexcomCurve.map(p=>parseFloat(p.value));
@@ -288,7 +288,7 @@ async function aiAnalyse(dayCtx, cfg, apiKey) {
     const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);
     const nv=dayCtx.dexcomCurve.filter(p=>{const h=parseInt(p.time.split(":")[0]);return h>=22||h<=7;}).map(p=>parseFloat(p.value));
     const na=nv.length>0 (nv.reduce((s,v)=>s+v,0)/nv.length).toFixed(2):null;
-    lines.push("Courbe Dexcom: moy="+avg+"g/L tir="+tir+"%"+(na " moy_nuit="+na+"g/L":""));
+    lines.push("Courbe Dexcom: moy="+avg+"g/L tir="+tir+"%"+(na ? " moy_nuit="+na+"g/L":""));
   }
   const instr = "
 === MISSION ===
@@ -410,8 +410,8 @@ function parseDexcomCSV(text) {
 }
 
 function Pill({color,children}){return <span style={{background:"rgba(0,0,0,0.06)",color,border:"1px solid "+color,borderRadius:20,padding:"2px 10px",fontSize:11,fontWeight:700}}>{children}</span>;}
-function PBtn({onClick,color,children,disabled,full,small}){return <button onClick={onClick} disabled={disabled} style={{width:full "100%":"auto",padding:small "6px 12px":"10px 18px",background:disabled "#ccc":color,color:"white",border:"none",borderRadius:10,fontWeight:700,fontSize:small 12:14,cursor:disabled "not-allowed":"pointer",fontFamily:"inherit"}}>{children}</button>;}
-function OBtn({onClick,color,children,small}){return <button onClick={onClick} style={{padding:small "5px 12px":"8px 16px",background:"transparent",color,border:"2px solid "+color,borderRadius:8,fontWeight:700,fontSize:small 12:13,cursor:"pointer",fontFamily:"inherit"}}>{children}</button>;}
+function PBtn({onClick,color,children,disabled,full,small}){return <button onClick={onClick} disabled={disabled} style={{width:full ? "100%":"auto",padding:small ? "6px 12px":"10px 18px",background:disabled ? "#ccc":color,color:"white",border:"none",borderRadius:10,fontWeight:700,fontSize:small 12:14,cursor:disabled ? "not-allowed":"pointer",fontFamily:"inherit"}}>{children}</button>;}
+function OBtn({onClick,color,children,small}){return <button onClick={onClick} style={{padding:small ? "5px 12px":"8px 16px",background:"transparent",color,border:"2px solid "+color,borderRadius:8,fontWeight:700,fontSize:small 12:13,cursor:"pointer",fontFamily:"inherit"}}>{children}</button>;}
 function Lbl({children}){return <label style={{display:"block",color:C.muted,fontSize:11,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>{children}</label>;}
 function TInput({value,onChange,placeholder,type,step,min}){return <input type={type||"text"} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} step={step} min={min} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,color:C.text,fontFamily:"inherit",outline:"none",boxSizing:"border-box",background:"white"}}/>;}
 function TTime({value,onChange}){return <input type="time" value={value} onChange={e=>onChange(e.target.value)} style={{padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,color:C.text,fontFamily:"inherit"}}/>;}
@@ -445,7 +445,7 @@ function DayCurve({pts,insulins,meals,cfg,width,height}){
   return (<svg width={width} height={height} style={{display:"block"}}>
     <rect x={pL} y={ty(mx)} width={W} height={Math.abs(ty(mn)-ty(mx))} fill="rgba(22,163,74,0.08)"/>
     {[0.7,mn,mx,2.0].map(v=>(<g key={v}>
-      <line x1={pL} y1={ty(v)} x2={pL+W} y2={ty(v)} stroke={v===mn||v===mx "#16a34a55":"#e5e7eb"} strokeWidth={v===mn||v===mx "1.5":"1"} strokeDasharray="3,3"/>
+      <line x1={pL} y1={ty(v)} x2={pL+W} y2={ty(v)} stroke={v===mn||v===mx ? "#16a34a55":"#e5e7eb"} strokeWidth={v===mn||v===mx ? "1.5":"1"} strokeDasharray="3,3"/>
       <text x={pL-4} y={ty(v)+4} textAnchor="end" fontSize="9" fill="#9ca3af">{v}</text>
     </g>))}
     {hours.filter((_,i)=>i%3===0).map(h=>(<g key={h}>
@@ -453,7 +453,7 @@ function DayCurve({pts,insulins,meals,cfg,width,height}){
       <text x={tx(h*60)} y={pT+H+14} textAnchor="middle" fontSize="8" fill="#9ca3af">{h+"h"}</text>
     </g>))}
     <polyline points={ptStr} fill="none" stroke={C.blue} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
-    {pts.filter((_,i)=>i%6===0).map((_,i)=>{const ri=i*6;const v=vals[ri];const col=v<0.7 C.red:v>=(cfg||DEF).tMin&&v<=(cfg||DEF).tMax C.green:v<=(cfg||DEF).tMax+0.3 C.orange:C.red;return <circle key={ri} cx={tx(times[ri])} cy={ty(v)} r="2" fill={col}/>;  })}
+    {pts.filter((_,i)=>i%6===0).map((_,i)=>{const ri=i*6;const v=vals[ri];const col=v<0.7 ? C.red:v>=(cfg||DEF).tMin&&v<=(cfg||DEF).tMax ? C.green:v<=(cfg||DEF).tMax+0.3 ? C.orange:C.red;return <circle key={ri} cx={tx(times[ri])} cy={ty(v)} r="2" fill={col}/>;  })}
     {mMarkers.map((m,i)=><g key={"m"+i}>
       <polygon points={m.x+","+(pT+H-2)+" "+(m.x-5)+","+(pT+H-10)+" "+(m.x+5)+","+(pT+H-10)} fill={m.col} opacity="0.8"/>
       {m.lbl&&<text x={m.x} y={pT+H-12} textAnchor="middle" fontSize="8" fill={m.col} fontWeight="bold">{m.lbl}</text>}
@@ -489,20 +489,20 @@ function GlucidesAI({initDesc,onAccept,apiKey,photo}){
     finally{setLoading(false);}
   };
   const active=aiRes||res;
-  const cc=aiRes C.green:C.blue;
+  const cc=aiRes ? C.green:C.blue;
   return(<div style={{background:"#fff7ed",border:"1.5px solid "+C.orange,borderRadius:12,padding:16,marginTop:10}}>
     <div style={{fontWeight:700,color:C.orange,fontSize:13,marginBottom:8}}>Estimation des glucides</div>
     <textarea value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Ex: 2 tranches de pain, 1 banane, 1 yaourt..." rows={2}
       style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box",marginBottom:8}}/>
     <div style={{display:"flex",gap:8}}>
       <PBtn onClick={estimate} disabled={!desc.trim()} color={C.blue} full small>Estimer</PBtn>
-      <button onClick={enhance} disabled={loading||!desc.trim()} style={{padding:"6px 12px",background:"white",color:C.orange,border:"1.5px solid "+C.orange,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>{loading "...":(photo "IA photo":"+ IA")}</button>
+      <button onClick={enhance} disabled={loading||!desc.trim()} style={{padding:"6px 12px",background:"white",color:C.orange,border:"1.5px solid "+C.orange,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>{loading ? "...":(photo ? "IA photo":"+ IA")}</button>
     </div>
     {err&&<div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 10px",marginTop:8,fontSize:12,color:"#92400e"}}>{err}</div>}
     {active&&active.found!==false&&(<div style={{marginTop:10,background:"white",borderRadius:10,border:"1px solid "+C.border,overflow:"hidden"}}>
       <div style={{background:cc,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span style={{color:"white",fontWeight:800,fontSize:18}}>{active.total+"g"}</span>
-        <span style={{color:"white",fontSize:11}}>{aiRes "estimation IA":"estimation locale"}</span>
+        <span style={{color:"white",fontSize:11}}>{aiRes ? "estimation IA":"estimation locale"}</span>
       </div>
       <div style={{padding:"10px 12px"}}>
         {active.items&&active.items.map((it,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid "+C.border,fontSize:12}}><span>{it.name}</span><span style={{fontWeight:700,color:C.blue}}>{it.glucides+"g"}</span></div>)}
@@ -542,7 +542,7 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}){
       doseSuggeree:sug sug.total:null});
     setOpen(false);
   };
-  return(<div style={{borderRadius:14,border:"1.5px solid "+(saved meal.color:C.border),background:saved "rgba(0,0,0,0.01)":"white",marginBottom:10}}>
+  return(<div style={{borderRadius:14,border:"1.5px solid "+(saved meal.color:C.border),background:saved ? "rgba(0,0,0,0.01)":"white",marginBottom:10}}>
     <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span style={{background:meal.color,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>{meal.tag}</span>
@@ -551,7 +551,7 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}){
           {saved
              <div style={{fontSize:12,color:C.muted}}>
                 {saved.time}
-                {saved.desc " - "+saved.desc.slice(0,28)+(saved.desc.length>28 "...":""):""} 
+                {saved.desc ? " - "+saved.desc.slice(0,28)+(saved.desc.length>28 ? "...":""):""} 
                 {saved.glucides&&<span style={{marginLeft:4,color:meal.color,fontWeight:700}}>{saved.glucides+"g"}</span>}
                 {(saved.glyEffective||saved.glyManuelle||saved.glycemieAuto)&&<span style={{marginLeft:4,color:glyColor(saved.glyEffective||saved.glyManuelle||saved.glycemieAuto,cfg),fontWeight:700}}>{(saved.glyEffective||saved.glyManuelle||saved.glycemieAuto)+" g/L"}</span>}
                 {totB>0&&<span style={{marginLeft:4,color:C.red,fontWeight:700}}>{totB.toFixed(1)+" UI"}</span>}
@@ -561,7 +561,7 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}){
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
         {saved&&<Pill color={meal.color}>OK</Pill>}
-        <span style={{color:C.muted}}>{open "^":"v"}</span>
+        <span style={{color:C.muted}}>{open ? "^":"v"}</span>
       </div>
     </div>
     {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid "+C.border}}>
@@ -578,11 +578,11 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}){
         {!curve&&<div style={{fontSize:12,color:C.orange,marginBottom:8}}>Pas de courbe Dexcom - saisie manuelle</div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,alignItems:"end"}}>
           <div>
-            <Lbl>{glyAuto "Valeur manuelle (override)":"Valeur manuelle (g/L)"}</Lbl>
+            <Lbl>{glyAuto ? "Valeur manuelle (override)":"Valeur manuelle (g/L)"}</Lbl>
             <TInput type="number" value={glyMan} onChange={setGlyMan} placeholder={glyAuto glyAuto.value+" (Dexcom)":"ex: 1.40"} min="0" step="0.01"/>
           </div>
           <div>{glyEff&&<div style={{padding:"9px 12px",background:glyColor(glyEff.toFixed(2),cfg)+"22",border:"1.5px solid "+glyColor(glyEff.toFixed(2),cfg),borderRadius:8,textAlign:"center"}}>
-            <div style={{fontSize:10,color:C.muted}}>{glyMan "Manuelle":"Dexcom"}</div>
+            <div style={{fontSize:10,color:C.muted}}>{glyMan ? "Manuelle":"Dexcom"}</div>
             <div style={{fontWeight:800,color:glyColor(glyEff.toFixed(2),cfg),fontSize:14}}>{glyEff.toFixed(2)+" g/L"}</div>
             <div style={{fontSize:10,color:glyColor(glyEff.toFixed(2),cfg)}}>{glyLabel(glyEff.toFixed(2),cfg)}</div>
           </div>}</div>
@@ -590,7 +590,7 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}){
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 50px",gap:10,alignItems:"end",marginBottom:4}}>
         <div><Lbl>Glucides (g)</Lbl><TInput type="number" value={glucides} onChange={setGlucides} placeholder="0" min="0"/></div>
-        <button onClick={()=>setShowAI(!showAI)} style={{padding:"9px 10px",background:showAI "#fff7ed":"white",color:C.orange,border:"1.5px solid "+C.orange,borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",width:"100%"}}>IA</button>
+        <button onClick={()=>setShowAI(!showAI)} style={{padding:"9px 10px",background:showAI ? "#fff7ed":"white",color:C.orange,border:"1.5px solid "+C.orange,borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",width:"100%"}}>IA</button>
       </div>
       {showAI&&<GlucidesAI initDesc={desc} onAccept={v=>{setGlucides(String(v));setShowAI(false);}} apiKey={apiKey} photo={photo}/>}
       {sug&&(<div style={{background:"#fef2f2",border:"1.5px solid #fca5a5",borderRadius:10,padding:"12px 14px",marginTop:12}}>
@@ -598,7 +598,7 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}){
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:8}}>
           {[["Bolus repas",sug.br+" UI"],["Correction",sug.bc+" UI"],["Total",sug.total+" UI"]].map(([l,v])=>(<div key={l} style={{textAlign:"center",background:"white",borderRadius:6,padding:"6px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontWeight:800,color:C.red,fontSize:14}}>{v}</div></div>))}
         </div>
-        {glyEff&&<div style={{fontSize:11,color:C.muted,marginBottom:8}}>{"Calc: "+(glucides glucides+"g / "+cfg.ratioIC+" = "+sug.br+" UI":""  )+(parseFloat(sug.bc)>0 " + ("+glyEff.toFixed(2)+"-"+cfg.ciblePre+") / "+cfg.fc+" = "+sug.bc+" UI":"")}</div>}
+        {glyEff&&<div style={{fontSize:11,color:C.muted,marginBottom:8}}>{"Calc: "+(glucides glucides+"g / "+cfg.ratioIC+" = "+sug.br+" UI":""  )+(parseFloat(sug.bc)>0 ? " + ("+glyEff.toFixed(2)+"-"+cfg.ciblePre+") / "+cfg.fc+" = "+sug.bc+" UI":"")}</div>}
         <button onClick={()=>{setInsulR(sug.br);setBolus(sug.bc);}} style={{width:"100%",padding:"6px",background:C.red,color:"white",border:"none",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Utiliser cette dose</button>
       </div>)}
       <div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:6}}>
@@ -632,17 +632,17 @@ function LentePanel({entries,onAdd,onDelete}){
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span style={{background:C.blue,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>Lente</span>
         <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Insuline lente</div>
-          <div style={{fontSize:12,color:C.muted}}>{entries.length===0 "Aucune injection":"Total: "+tot+" UI"}</div>
+          <div style={{fontSize:12,color:C.muted}}>{entries.length===0 ? "Aucune injection":"Total: "+tot+" UI"}</div>
         </div>
       </div>
       <div style={{display:"flex",gap:6,alignItems:"center"}}>
         {tot>0&&<Pill color={C.blue}>{tot+" UI"}</Pill>}
-        <span style={{color:C.muted}}>{open "^":"v"}</span>
+        <span style={{color:C.muted}}>{open ? "^":"v"}</span>
       </div>
     </div>
     {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #bfdbfe"}}>
       {entries.map(e=>(<div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"white",borderRadius:8,marginBottom:6,border:"1px solid "+C.border}}>
-        <span style={{fontSize:13}}>{e.time+" - "}<strong>{e.units+" UI"}</strong>{e.note " - "+e.note:""}</span>
+        <span style={{fontSize:13}}>{e.time+" - "}<strong>{e.units+" UI"}</strong>{e.note ? " - "+e.note:""}</span>
         <button onClick={()=>onDelete(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:16}}>x</button>
       </div>))}
       <div style={{background:"white",borderRadius:10,padding:14,border:"1px solid "+C.border}}>
@@ -716,7 +716,7 @@ function ConfigPanel({cfg,onSave,allData}){
         <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Mes parametres</div>
           <div style={{fontSize:12,color:C.muted}}>{"Cible: "+cfg.tMin+"-"+cfg.tMax+" | 1UI/"+cfg.ratioIC+"g | FC: "+cfg.fc}</div>
         </div>
-      </div><span style={{color:C.muted}}>{open "^":"v"}</span>
+      </div><span style={{color:C.muted}}>{open ? "^":"v"}</span>
     </div>
     {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid "+C.border}}>
       <div style={{marginBottom:12}}>
@@ -748,7 +748,7 @@ function ConfigPanel({cfg,onSave,allData}){
         <div style={{marginTop:12}}>
           <Lbl>Cle API Anthropic (pour IA + photo)</Lbl>
           <input type="password" value={apiKeyInput} onChange={e=>setApiKeyInput(e.target.value)} placeholder="sk-ant-..."
-            style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+(apiKeyInput C.green:C.border),borderRadius:8,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}}/>
+            style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+(apiKeyInput ? C.green:C.border),borderRadius:8,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}}/>
           <div style={{fontSize:10,color:C.muted,marginTop:4}}>console.anthropic.com - stockee uniquement sur votre appareil</div>
         </div>
       </div>
@@ -757,9 +757,9 @@ function ConfigPanel({cfg,onSave,allData}){
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         <PBtn onClick={save} color={C.green} full>Enregistrer</PBtn>
-        <OBtn onClick={recalc} color={C.blue} small>{rcLoading "Calcul...":"Recalculer"}</OBtn>
+        <OBtn onClick={recalc} color={C.blue} small>{rcLoading ? "Calcul...":"Recalculer"}</OBtn>
       </div>
-      {rcResult&&(<div style={{background:rcResult.ok "#f0fdf4":"#fef2f2",border:"1px solid "+(rcResult.ok "#86efac":"#fca5a5"),borderRadius:8,padding:"12px 14px"}}>
+      {rcResult&&(<div style={{background:rcResult.ok ? "#f0fdf4":"#fef2f2",border:"1px solid "+(rcResult.ok ? "#86efac":"#fca5a5"),borderRadius:8,padding:"12px 14px"}}>
         {rcResult.ok (<>
           <div style={{fontWeight:700,color:C.green,marginBottom:8}}>{"Calcul sur "+rcResult.count+" repas"}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:8}}>
@@ -788,7 +788,7 @@ function ClarityImporter({allData,saveAll}){
       if(result.error){setStatus({type:"error",msg:result.error});return;}
       const dc=Object.keys(result).length,pc=Object.values(result).reduce((s,a)=>s+a.length,0);
       setParsed(result);
-      setStatus({type:"ok",msg:pc+" mesures sur "+dc+" jour"+(dc>1 "s":"")+"."});
+      setStatus({type:"ok",msg:pc+" mesures sur "+dc+" jour"+(dc>1 ? "s":"")+"."});
     };
     reader.readAsText(file);
   };
@@ -798,23 +798,23 @@ function ClarityImporter({allData,saveAll}){
     Object.entries(parsed).forEach(([dk,pts])=>{nd[dk]={...(nd[dk]||{}),dexcomCurve:pts};});
     saveAll({...allData,days:nd});
     setImported(true);
-    setStatus({type:"success",msg:"Import OK - "+Object.keys(parsed).length+" jour"+(Object.keys(parsed).length>1 "s":"")+" mis a jour."});
+    setStatus({type:"success",msg:"Import OK - "+Object.keys(parsed).length+" jour"+(Object.keys(parsed).length>1 ? "s":"")+" mis a jour."});
   };
   return(<div style={{borderRadius:14,border:"1.5px solid "+C.blue,background:"#eff6ff",marginBottom:12}}>
     <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span style={{background:C.blue,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>CSV</span>
         <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Importer Dexcom Clarity</div>
-          <div style={{fontSize:12,color:C.muted}}>{imported "Import OK":"clarity.dexcom.com - Export CSV"}</div>
+          <div style={{fontSize:12,color:C.muted}}>{imported ? "Import OK":"clarity.dexcom.com - Export CSV"}</div>
         </div>
-      </div><span style={{color:C.muted}}>{open "^":"v"}</span>
+      </div><span style={{color:C.muted}}>{open ? "^":"v"}</span>
     </div>
     {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #bfdbfe"}}>
       <div style={{background:"#dbeafe",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.blue}}>
         <strong>Export Dexcom Clarity:</strong> clarity.dexcom.com - Rapports - icone export - Telecharger CSV
       </div>
-      <div onClick={()=>ref.current.click()} style={{border:"2px dashed "+(parsed C.green:"#93c5fd"),borderRadius:10,padding:"16px",cursor:"pointer",textAlign:"center",background:parsed "#f0fdf4":"white",marginBottom:10}}>
-        <div style={{fontWeight:700,color:parsed C.green:C.blue,fontSize:13}}>{parsed "Fichier charge - cliquer pour changer":"Cliquer pour selectionner le CSV"}</div>
+      <div onClick={()=>ref.current.click()} style={{border:"2px dashed "+(parsed ? C.green:"#93c5fd"),borderRadius:10,padding:"16px",cursor:"pointer",textAlign:"center",background:parsed ? "#f0fdf4":"white",marginBottom:10}}>
+        <div style={{fontWeight:700,color:parsed ? C.green:C.blue,fontSize:13}}>{parsed ? "Fichier charge - cliquer pour changer":"Cliquer pour selectionner le CSV"}</div>
         <div style={{fontSize:11,color:C.muted,marginTop:2}}>.csv</div>
       </div>
       <input ref={ref} type="file" accept=".csv,text/csv" style={{display:"none"}} onChange={e=>{if(e.target.files[0])handleFile(e.target.files[0]);}}/>
@@ -828,7 +828,7 @@ function ClarityImporter({allData,saveAll}){
             <span style={{fontSize:12,color:C.blue,fontWeight:700}}>{pts.length+" pts | moy: "+avg+" g/L"}</span>
           </div>);
         })}
-        <button onClick={doImport} style={{width:"100%",padding:"12px",background:C.blue,color:"white",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>{"Importer "+Object.keys(parsed).length+" jour"+(Object.keys(parsed).length>1 "s":"")}</button>
+        <button onClick={doImport} style={{width:"100%",padding:"12px",background:C.blue,color:"white",border:"none",borderRadius:10,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit",marginTop:4}}>{"Importer "+Object.keys(parsed).length+" jour"+(Object.keys(parsed).length>1 ? "s":"")}</button>
       </div>)}
     </div>)}
   </div>);
@@ -885,7 +885,7 @@ function analyseLocal(dayData, cfg) {
     const cAvg = vals.reduce((s, v) => s + v, 0) / vals.length;
     const tir = Math.round(vals.filter(v => v >= cfg.tMin && v <= cfg.tMax).length / vals.length * 100);
     score = Math.round(Math.min(10, Math.max(1, tir / 10)));
-    resume = "Courbe Dexcom: moyenne " + cAvg.toFixed(2) + " g/L, " + tir + "% du temps dans la cible. " + (tir >= 70 ? "Bon equilibre." : "Equilibre perfectible.");
+    resume = "Courbe Dexcom: moyenne ? " + cAvg.toFixed(2) + " g/L, " + tir + "% du temps dans la cible. ? " + (tir >= 70 ? "Bon equilibre." : "Equilibre perfectible.");
     const below = vals.filter(v => v < 0.7).length / vals.length * 100;
     if (below > 1) obs.push({ heure: "", type: "hypo", texte: "Hypoglycemies detectees (" + Math.round(below) + "% sous 0.70 g/L)." });
   }
@@ -955,17 +955,17 @@ function analyseLocal(dayData, cfg) {
 
 function ScreenshotPanel({ value, onChange }){
   const ref=useRef();
-  return(<div style={{borderRadius:14,border:"1.5px solid "+(value C.green:"#fcd34d"),background:value "#f0fdf4":"#fffbeb",marginBottom:10,padding:"14px 16px"}}>
+  return(<div style={{borderRadius:14,border:"1.5px solid "+(value ? C.green:"#fcd34d"),background:value ? "#f0fdf4":"#fffbeb",marginBottom:10,padding:"14px 16px"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:value 10:0}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
-        <span style={{background:value C.green:C.orange,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>Photo</span>
+        <span style={{background:value ? C.green:C.orange,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>Photo</span>
         <div>
           <div style={{fontWeight:700,color:C.text,fontSize:15}}>Capture courbe Dexcom</div>
-          <div style={{fontSize:12,color:C.muted}}>{value "Capture enregistree":"Capturez votre courbe 24h depuis l app Dexcom"}</div>
+          <div style={{fontSize:12,color:C.muted}}>{value ? "Capture enregistree":"Capturez votre courbe 24h depuis l app Dexcom"}</div>
         </div>
       </div>
-      <label style={{cursor:"pointer",fontSize:12,color:"white",fontWeight:700,background:value C.green:C.orange,borderRadius:8,padding:"6px 12px"}}>
-        {value "Changer":"Importer"}
+      <label style={{cursor:"pointer",fontSize:12,color:"white",fontWeight:700,background:value ? C.green:C.orange,borderRadius:8,padding:"6px 12px"}}>
+        {value ? "Changer":"Importer"}
         <input ref={ref} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{if(e.target.files[0])onChange(await f2b64(e.target.files[0]));}}/>
       </label>
     </div>
@@ -993,25 +993,25 @@ function AnalysePanel({dayData,dayLabel,cfg,apiKey}){
     catch(e){setErr("IA indisponible ("+e.message+"). L analyse locale ci-dessus reste valable.");}
     finally{setLoading(false);}
   };
-  const sc=s=>s>=8 C.green:s>=5 C.orange:C.red;
+  const sc=s=>s>=8 ? C.green:s>=5 ? C.orange:C.red;
   return(<div style={{borderRadius:14,border:"1.5px solid "+C.purple,background:"#faf5ff",marginBottom:10}}>
     <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span style={{background:C.purple,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>IA</span>
         <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Analyse de la veille</div>
-          <div style={{fontSize:12,color:C.muted}}>{result "Score: "+result.score_equilibre+"/10":dayLabel}</div>
+          <div style={{fontSize:12,color:C.muted}}>{result ? "Score: "+result.score_equilibre+"/10":dayLabel}</div>
         </div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
         {result&&<span style={{fontWeight:800,fontSize:16,color:sc(result.score_equilibre)}}>{result.score_equilibre+"/10"}</span>}
-        <span style={{color:C.muted}}>{open "^":"v"}</span>
+        <span style={{color:C.muted}}>{open ? "^":"v"}</span>
       </div>
     </div>
     {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #ede9fe"}}>
       {!hasData&&<p style={{color:C.muted,fontSize:13,marginBottom:12}}>{"Aucune donnee pour le "+dayLabel}</p>}
       {!result&&(<div style={{marginBottom:12}}>
         <p style={{fontSize:13,color:C.text,marginBottom:10}}>{"Analyse croisee repas/insuline/Dexcom du "+dayLabel}</p>
-        <PBtn onClick={run} disabled={loading||!hasData} color={C.purple} full>{loading "Analyse en cours...":"Lancer l analyse"}</PBtn>
+        <PBtn onClick={run} disabled={loading||!hasData} color={C.purple} full>{loading ? "Analyse en cours...":"Lancer l analyse"}</PBtn>
         {err&&<div style={{background:"#fef2f2",border:"1.5px solid #fca5a5",borderRadius:8,padding:"10px 12px",marginTop:10,fontSize:13,color:C.red}}><strong>Erreur:</strong> {err}<br/><button onClick={()=>{setErr(null);run();}} style={{marginTop:8,fontSize:12,color:C.red,background:"none",border:"1px solid #fca5a5",borderRadius:6,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}}>Reessayer</button></div>}
       </div>)}
       {result&&(<div>
@@ -1026,11 +1026,11 @@ function AnalysePanel({dayData,dayLabel,cfg,apiKey}){
           <div style={{fontSize:11,fontWeight:700,color:C.red,textTransform:"uppercase",marginBottom:8}}>Analyse des doses</div>
           {result.conseils_dosage.map((d,i)=>{
             const ecart=parseFloat(d.ecart)||0;
-            const dc=Math.abs(ecart)<1 C.green:Math.abs(ecart)<3 C.orange:C.red;
+            const dc=Math.abs(ecart)<1 ? C.green:Math.abs(ecart)<3 ? C.orange:C.red;
             return(<div key={i} style={{background:"white",borderRadius:10,border:"1.5px solid "+dc,padding:"12px 14px",marginBottom:8}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                 <span style={{fontWeight:700}}>{d.repas}</span>
-                <span style={{background:dc,color:"white",borderRadius:6,padding:"2px 10px",fontSize:12,fontWeight:700}}>{ecart===0 "OK":ecart>0 "+"+ecart+" UI":Math.abs(ecart)+" UI manquantes"}</span>
+                <span style={{background:dc,color:"white",borderRadius:6,padding:"2px 10px",fontSize:12,fontWeight:700}}>{ecart===0 ? "OK":ecart>0 ? "+"+ecart+" UI":Math.abs(ecart)+" UI manquantes"}</span>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:6}}>
                 {[["Glyc. avant",d.gly_pre,C.purple],["Glucides",(d.glucides||"---")+"g",C.orange],["Injecte",(d.dose_injectee||"---")+" UI",C.red]].map(([l,v,col])=>(<div key={l} style={{textAlign:"center",background:col+"11",borderRadius:8,padding:"6px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontSize:13,fontWeight:700,color:col}}>{v}</div></div>))}
@@ -1049,7 +1049,7 @@ function AnalysePanel({dayData,dayLabel,cfg,apiKey}){
         </div>)}
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <OBtn onClick={()=>setResult(null)} color={C.purple} small>Relancer</OBtn>
-          {!result._ai&&<button onClick={enhanceAI} disabled={loading} style={{padding:"5px 12px",background:"white",color:C.orange,border:"2px solid "+C.orange,borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{loading "...":"Enrichir avec IA"}</button>}
+          {!result._ai&&<button onClick={enhanceAI} disabled={loading} style={{padding:"5px 12px",background:"white",color:C.orange,border:"2px solid "+C.orange,borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{loading ? "...":"Enrichir avec IA"}</button>}
           {result._ai&&<span style={{fontSize:11,color:C.green,fontWeight:700}}>Analyse IA</span>}
         </div>
         {err&&<div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 10px",marginTop:8,fontSize:12,color:"#92400e"}}>{err}</div>}
@@ -1086,7 +1086,7 @@ function buildReport(allData,from,to){
   body+='<p style="margin-top:4px;opacity:.7">Genere le '+new Date().toLocaleDateString("fr-FR")+'</p></div>';
   body+='<div class="sum">';
   body+='<div class="sbox"><div class="v">'+days.length+'</div><div class="l">Jours</div></div>';
-  body+='<div class="sbox"><div class="v">'+avgG+(avgG!=="N/A" " g/L":"")+'</div><div class="l">Glycemie moy.</div></div>';
+  body+='<div class="sbox"><div class="v">'+avgG+(avgG!=="N/A" ? " g/L":"")+'</div><div class="l">Glycemie moy.</div></div>';
   body+='<div class="sbox"><div class="v">'+( tir!==null tir+"%":"N/A")+'</div><div class="l">Temps cible</div></div>';
   body+='<div class="sbox"><div class="v">'+cfg.tMin+"-"+cfg.tMax+" g/L"+'</div><div class="l">Fourchette</div></div></div>';
   days.forEach(day=>{
@@ -1672,7 +1672,7 @@ function DexcomLive({ allData, saveAll, cfg }) {
             <div>
               <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: C.green }}>
                 <strong>Connecte en tant que :</strong> {allData.dexcomCreds.username}<br />
-                <strong>Region :</strong> {allData.dexcomCreds.region === "eu" ? "Europe" : "USA"}<br />
+                <strong>Region :</strong> {allData.dexcomCreds.region === "eu" "Europe" : "USA"}<br />
                 <strong>Synchro automatique :</strong> toutes les 5 minutes
               </div>
               {lastSync && <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>Derniere synchro: {lastSync.toLocaleString("fr-FR")}</div>}
@@ -1684,9 +1684,9 @@ function DexcomLive({ allData, saveAll, cfg }) {
           )}
           {status && (
             <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, fontSize: 13,
-              background: status.type === "error" ? "#fef2f2" : status.type === "ok" ? "#f0fdf4" : "#f0f9ff",
-              color: status.type === "error" ? C.red : status.type === "ok" ? C.green : C.blue,
-              border: "1px solid " + (status.type === "error" ? "#fca5a5" : status.type === "ok" ? "#86efac" : "#93c5fd") }}>
+              background: status.type === "error" "#fef2f2" : status.type === "ok" "#f0fdf4" : "#f0f9ff",
+              color: status.type === "error" C.red : status.type === "ok" C.green : C.blue,
+              border: "1px solid " + (status.type === "error" "#fca5a5" : status.type === "ok" "#86efac" : "#93c5fd") }}>
               {status.msg}
             </div>
           )}
@@ -1719,7 +1719,7 @@ export default function App(){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div><h1 style={{fontSize:18,fontWeight:800,color:C.red,margin:0}}>DiabeteTracker</h1><p style={{color:C.muted,fontSize:11,margin:0}}>Dexcom ONE+</p></div>
         <div style={{display:"flex",gap:6}}>
-          {[["journal","Journal"],["report","Rapport"]].map(([k,l])=>(<button key={k} onClick={()=>setTab(k)} style={{padding:"7px 14px",borderRadius:8,border:"2px solid "+(tab===k C.red:C.border),background:tab===k C.red:"white",color:tab===k "white":C.muted,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>))}
+          {[["journal","Journal"],["report","Rapport"]].map(([k,l])=>(<button key={k} onClick={()=>setTab(k)} style={{padding:"7px 14px",borderRadius:8,border:"2px solid "+(tab===k ? C.red:C.border),background:tab===k ? C.red:"white",color:tab===k ? "white":C.muted,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>))}
         </div>
       </div>
     </div>
@@ -1730,10 +1730,10 @@ export default function App(){
           const {wd,day:dn}=fmtShort(d);const isA=d===activeDay;const isT=d===TODAY();
           const hC=!!(allData.days&&allData.days[d]&&allData.days[d].dexcomCurve);
           const hM=!!(allData.days&&allData.days[d]&&allData.days[d].meals&&Object.keys(allData.days[d].meals).length>0);
-          return(<button key={d} onClick={()=>setActiveDay(d)} style={{flexShrink:0,minWidth:50,padding:"8px 10px",borderRadius:12,cursor:"pointer",textAlign:"center",border:"2px solid "+(isA C.red:C.border),background:isA "#fff5f5":"white"}}>
-            <div style={{fontSize:10,color:isA C.red:C.muted,fontWeight:700,textTransform:"uppercase"}}>{wd}</div>
-            <div style={{fontSize:18,fontWeight:800,color:isA C.red:C.text,lineHeight:1.3}}>{dn}</div>
-            <div style={{fontSize:9,color:hC C.blue:hM C.green:C.muted}}>{isT "auj.":hC "dex":hM "ok":"-"}</div>
+          return(<button key={d} onClick={()=>setActiveDay(d)} style={{flexShrink:0,minWidth:50,padding:"8px 10px",borderRadius:12,cursor:"pointer",textAlign:"center",border:"2px solid "+(isA ? C.red:C.border),background:isA ? "#fff5f5":"white"}}>
+            <div style={{fontSize:10,color:isA ? C.red:C.muted,fontWeight:700,textTransform:"uppercase"}}>{wd}</div>
+            <div style={{fontSize:18,fontWeight:800,color:isA ? C.red:C.text,lineHeight:1.3}}>{dn}</div>
+            <div style={{fontSize:9,color:hC ? C.blue : hM ? C.green : C.muted}}>{isT ? "auj.":hC ? "dex":hM ? "ok":"-"}</div>
           </button>);
         })}
       </div>
@@ -1753,7 +1753,7 @@ export default function App(){
           const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);
           const above=Math.round(vals.filter(v=>v>cfg.tMax).length/vals.length*100);
           return(<div style={{display:"flex",gap:8,marginTop:8}}>
-            {[["Moyenne",avg+" g/L",C.blue],["Temps cible",tir+"%",tir>=70 C.green:C.orange],["Au-dessus",above+"%",above>20 C.red:C.green]].map(([l,v,col])=>(<div key={l} style={{flex:1,textAlign:"center",background:col+"11",borderRadius:8,padding:"5px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontSize:13,fontWeight:700,color:col}}>{v}</div></div>))}
+            {[["Moyenne",avg+" g/L",C.blue],["Temps cible",tir+"%",tir>=70 ? C.green:C.orange],["Au-dessus",above+"%",above>20 ? C.red:C.green]].map(([l,v,col])=>(<div key={l} style={{flex:1,textAlign:"center",background:col+"11",borderRadius:8,padding:"5px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontSize:13,fontWeight:700,color:col}}>{v}</div></div>))}
           </div>);
         })()}
       </div>):(<div style={{background:"#eff6ff",border:"1.5px dashed #93c5fd",borderRadius:12,padding:"14px 16px",marginBottom:12,textAlign:"center"}}>
