@@ -82,12 +82,18 @@ module.exports = async function handler(req, res) {
 
     if (action === "readings") {
       const now = new Date();
-      const start = new Date(now-24*60*60*1000).toISOString().slice(0,19);
-      const end = now.toISOString().slice(0,19);
-      const r = await get("/v3/users/self/egvs?startDate="+start+"&endDate="+end, accessToken);
+      // Get last 24h with proper format YYYY-MM-DDTHH:MM:SS
+      const start = new Date(now.getTime()-24*60*60*1000).toISOString().replace("Z","");
+      const end = now.toISOString().replace("Z","");
+      const path = "/v3/users/self/egvs?startDate="+encodeURIComponent(start)+"&endDate="+encodeURIComponent(end);
+      const r = await get(path, accessToken);
       if (r.status === 401) return res.status(401).json({error:"TOKEN_EXPIRED",code:"TOKEN_EXPIRED"});
-      if (r.status !== 200) return res.status(r.status).json({error:"Readings failed: "+JSON.stringify(r.data).slice(0,200)});
-      return res.status(200).json({readings: r.data.egvs || []});
+      if (r.status !== 200) return res.status(r.status).json({error:"Readings failed ("+r.status+"): "+JSON.stringify(r.data).slice(0,300)});
+      const egvs = r.data.egvs || r.data.records || r.data || [];
+      return res.status(200).json({
+        readings: Array.isArray(egvs) ? egvs : [],
+        debug: {total: Array.isArray(egvs)?egvs.length:0, keys: Object.keys(r.data||{}).slice(0,10)}
+      });
     }
 
     if (action === "auth_url") {
