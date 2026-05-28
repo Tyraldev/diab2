@@ -26,7 +26,13 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // Ne pas intercepter les routes API
+        navigateFallbackDenylist: [/^\/api\/.*/],
         runtimeCaching: [
+          {
+            urlPattern: /^\/api\/.*/,
+            handler: 'NetworkOnly'
+          },
           {
             urlPattern: /^https:\/\/api\.anthropic\.com\/.*/i,
             handler: 'NetworkOnly'
