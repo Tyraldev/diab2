@@ -537,10 +537,9 @@ function DexcomLive({allData,saveAll,cfg}){
     return()=>{if(intervalRef.current)clearInterval(intervalRef.current);};
   },[]);
 
-  const connect=()=>{
-    setLoading(true);
-    // Redirect through our server which handles the OAuth flow
-    window.location.href="/api/dexcom-auth";
+  const connect=(e)=>{
+    if(e) e.stopPropagation();
+    window.location.replace("/api/dexcom-auth");
   };
 
   const disconnect=()=>{
@@ -574,7 +573,7 @@ function DexcomLive({allData,saveAll,cfg}){
           Connexion securisee via le site officiel Dexcom.<br/>
           Vous serez redirige vers Dexcom pour autoriser l acces.
         </div>
-        <PBtn onClick={connect} disabled={loading} color={C.blue} full>{loading ? "Redirection..." : "Se connecter avec Dexcom"}</PBtn>
+        <PBtn onClick={e=>{e.stopPropagation();connect(e);}} color={C.blue} full>Se connecter avec Dexcom</PBtn>
       </div>) : (<div>
         <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.green}}>
           <strong>Connecte a Dexcom ONE+</strong><br/>Synchro automatique toutes les 5 minutes.
