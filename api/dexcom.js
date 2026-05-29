@@ -47,9 +47,13 @@ function libreReq(method, path, body, token) {
     const data = body ? JSON.stringify(body) : null;
     const headers = {
       "Content-Type": "application/json;charset=UTF-8",
+      "Accept": "application/json",
       "User-Agent": "Mozilla/5.0 (iPhone; CPU OS 17_4.1 like Mac OS X) AppleWebKit/536.26 (KHTML, like Gecko) Version/17.4.1 Mobile/10A5355d Safari/8536.25",
       "version": "4.16.0",
       "product": "llu.ios",
+      "Connection": "keep-alive",
+      "Pragma": "no-cache",
+      "Cache-Control": "no-cache",
     };
     if (token) headers["Authorization"] = "Bearer " + token;
     if (data) headers["Content-Length"] = Buffer.byteLength(data);
@@ -104,6 +108,8 @@ async function handleLibre(action, body, res) {
 
   if (action === "libre_readings") {
     if (body.region) LIBRE_HOST = body.region;
+    if (!token) return res.status(400).json({error:"No token provided", hasToken:!!token, bodyKeys:Object.keys(body)});
+    if (!patientId) return res.status(400).json({error:"No patientId provided"});
     const r = await libreReq("GET", "/llu/connections/"+patientId+"/graph", null, token);
     if (r.status === 401) return res.status(401).json({ error: "TOKEN_EXPIRED", code: "TOKEN_EXPIRED" });
     if (r.status !== 200) return res.status(r.status).json({ error: "Readings: "+JSON.stringify(r.data).slice(0,200) });
