@@ -50,7 +50,6 @@ function libreReq(method, path, body, token) {
       "domain": "Libreview",
       "version": "4.7",
       "product": "llu.ios",
-      "accept-encoding": "gzip, deflate, br",
     };
     if (token) headers["Authorization"] = "Bearer " + token;
     if (data) headers["Content-Length"] = Buffer.byteLength(data);
