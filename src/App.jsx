@@ -594,11 +594,13 @@ function LibreLive({allData, saveAll, cfg}) {
       Object.keys(byDay).forEach(dk => {
         newDays[dk] = {...(newDays[dk]||{}), dexcomCurve: byDay[dk]};
       });
-      // Save current reading for today
-      if(current && byDay[TODAY()]) {
-        newDays[TODAY()] = {...(newDays[TODAY()]||{}), livreCurrent: current};
+      // Determine the most recent reading (current or last in graph)
+      let liveGly = current;
+      if(!liveGly && readings.length>0) {
+        const last = readings[readings.length-1];
+        liveGly = {value:last.value, trend:last.trend, time:last.time};
       }
-      saveAll({...allData, days:newDays, libreCreds:c});
+      saveAll({...allData, days:newDays, libreCreds:c, liveGly:liveGly?{...liveGly,updatedAt:Date.now()}:null});
       setLastSync(new Date());
       setStatus({type:"ok", msg:readings.length+" mesures synchronisees"+(current?" - actuelle: "+current.value+" g/L "+current.trend:"")});
     } catch(e) {
@@ -882,8 +884,9 @@ function DexcomLive({allData,saveAll,cfg}){
     saveAll(nd);setStatus(null);setLastSync(null);
   };
 
+  const liveGly=allData.liveGly||null;
   const todayCurve=allData.days&&allData.days[TODAY()]&&allData.days[TODAY()].dexcomCurve;
-  const lastGly=todayCurve&&todayCurve.length>0 ? todayCurve[todayCurve.length-1] : null;
+  const lastGly=liveGly||(todayCurve&&todayCurve.length>0 ? todayCurve[todayCurve.length-1] : null);
   const trendArrow={"flat":"->","fortyfiveup":"/->","singleup":"^","doubleup":"^^","fortyfivedown":"\->","singledown":"v","doubledown":"vv"};
 
   return(<div style={{borderRadius:14,border:"2px solid "+(isConnected ? C.green : C.blue),background:isConnected ? "#f0fdf4" : "#eff6ff",marginBottom:12}}>
@@ -1156,6 +1159,45 @@ function buildReport(allData,from,to){
 }
 
 
+function GlyBanner({liveGly, cfg}){
+  if(!liveGly || !liveGly.value) return null;
+  const v = parseFloat(liveGly.value);
+  const mn = (cfg||DEF).tMin, mx = (cfg||DEF).tMax;
+  // Determine status
+  let bg, color, msg, icon;
+  if(v < 0.70) {
+    bg="#fef2f2"; color=C.red; icon="!"; msg="HYPOGLYCEMIE - Resucrez-vous immediatement (15g de sucre rapide)";
+  } else if(v < mn) {
+    bg="#fffbeb"; color="#d97706"; icon="v"; msg="En dessous de la cible - surveillez";
+  } else if(v <= mx) {
+    bg="#f0fdf4"; color=C.green; icon="OK"; msg="Dans la cible";
+  } else if(v <= 2.50) {
+    bg="#fffbeb"; color="#d97706"; icon="^"; msg="Au-dessus de la cible - hyperglycemie";
+  } else {
+    bg="#fef2f2"; color=C.red; icon="!!"; msg="HYPERGLYCEMIE SEVERE - Risque d acetonemie. Verifiez les cetones et ajustez l insuline";
+  }
+  // Time since update
+  const mins = liveGly.updatedAt ? Math.round((Date.now()-liveGly.updatedAt)/60000) : null;
+  const stale = mins!==null && mins>15;
+  return(
+    <div style={{background:bg,borderBottom:"1px solid "+color+"33",padding:"10px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+            <span style={{fontSize:28,fontWeight:800,color,lineHeight:1}}>{liveGly.value}</span>
+            <span style={{fontSize:13,color,fontWeight:600}}>g/L</span>
+            {liveGly.trend&&<span style={{fontSize:18,color,fontWeight:700}}>{liveGly.trend}</span>}
+          </div>
+        </div>
+        <div style={{flex:1,textAlign:"right"}}>
+          <div style={{fontSize:12,fontWeight:700,color,lineHeight:1.3}}>{msg}</div>
+          {mins!==null&&<div style={{fontSize:10,color:stale?C.red:C.muted}}>{stale?"Donnee ancienne ("+mins+" min)":"il y a "+mins+" min"}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App(){
   const [allData,saveAll,ready]=useStorage();
   const [activeDay,setActiveDay]=useState(TODAY());
@@ -1180,6 +1222,7 @@ export default function App(){
         <div><h1 style={{fontSize:18,fontWeight:800,color:C.red,margin:0}}>DiabeteTracker</h1><p style={{color:C.muted,fontSize:11,margin:0}}>{"Dexcom ONE+ | "+VERSION}</p></div>
         <div style={{display:"flex",gap:6}}>{[["journal","Journal"],["report","Rapport"],["params","Parametres"]].map(([k,l])=><button key={k} onClick={()=>setTab(k)} style={{padding:"7px 14px",borderRadius:8,border:"2px solid "+(tab===k ? C.red : C.border),background:tab===k ? C.red : "white",color:tab===k ? "white" : C.muted,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>)}</div>
       </div>
+      <GlyBanner liveGly={allData.liveGly} cfg={cfg}/>
     </div>
 
     {tab==="journal"&&(<div style={{padding:"16px 14px 40px"}}>
