@@ -789,7 +789,7 @@ async function dexcomExchangeCode(code){
   return d;
 }
 async function dexcomReadingsAPI(accessToken){
-  const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"libre_readings",accessToken})});
+  const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"readings",accessToken})});
   const d=await r.json();
   if(d.error&&d.code==="TOKEN_EXPIRED")throw new Error("TOKEN_EXPIRED");
   if(d.error)throw new Error(d.error);
