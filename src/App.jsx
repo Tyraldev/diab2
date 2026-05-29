@@ -626,17 +626,15 @@ function LibreLive({allData, saveAll, cfg}) {
       const auth = await libreLogin(username, password);
       setStatus({type:"info", msg:"Recherche du capteur..."});
 
-      // Get patient connections
-      let pid = auth.patientId;
-      if(!pid) {
-        const conns = await libreGetConnections(auth.token, auth.accountId);
-        if(conns.length > 0) pid = conns[0].id;
+      // ALWAYS get patientId from connections (le compte suiveur voit le patient via la connexion)
+      const conns = await libreGetConnections(auth.token, auth.accountId);
+      if(!conns || conns.length === 0) {
+        throw new Error("Aucun patient suivi. Utilisez le compte LibreLinkUp du PROCHE qui vous suit (ex: compte d Aline), pas votre compte patient.");
       }
+      const pid = conns[0].id;
+      const patientName = conns[0].name || "";
 
-      if(!pid) throw new Error("Aucun capteur trouve sur ce compte LibreView");
-
-      const c = {token: auth.token, patientId: pid, username, name: auth.name||username, region: auth.region||"", accountId: auth.accountId||""};
-
+      const c = {token: auth.token, patientId: pid, username, name: patientName||auth.name||username, region: auth.region||"", accountId: auth.accountId||""};
       // Sync readings
       setStatus({type:"info", msg:"Recuperation des donnees..."});
       await doSync(c);
