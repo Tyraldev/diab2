@@ -614,9 +614,13 @@ function LibreLive({allData, saveAll, cfg}) {
   };
 
   useEffect(() => {
-    if(isConnected) {
-      doSync(creds);
-      intervalRef.current = setInterval(() => doSync(creds), 5*60*1000);
+    const cr = allData.libreCreds;
+    if(cr && cr.token && cr.patientId) {
+      doSync(cr);
+      intervalRef.current = setInterval(() => {
+        const latest = allData.libreCreds;
+        if(latest && latest.token) doSync(latest);
+      }, 5*60*1000);
     }
     return () => { if(intervalRef.current) clearInterval(intervalRef.current); };
   }, []);
@@ -641,7 +645,7 @@ function LibreLive({allData, saveAll, cfg}) {
       // Sync readings
       setStatus({type:"info", msg:"Recuperation des donnees..."});
       await doSync(c);
-      saveAll({...allData, libreCreds: c});
+      saveAll({...allData, libreCreds: c, dexcomOAuth: undefined});
       setOpen(false);
 
       // Setup auto-refresh
@@ -703,7 +707,7 @@ function LibreLive({allData, saveAll, cfg}) {
           {lastSync&&<div style={{fontSize:11,color:C.muted,marginBottom:10}}>{"Derniere synchro: "+lastSync.toLocaleString("fr-FR")}</div>}
           <div style={{display:"flex",gap:8}}>
             <PBtn onClick={()=>doSync(creds)} color={C.green} full>Synchroniser maintenant</PBtn>
-            <button onClick={async()=>{try{const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"libre_debug",token:creds.token,patientId:creds.patientId,region:creds.region,accountId:creds.accountId})});const d=await r.json();setStatus({type:"info",msg:"DEBUG: "+d.connectionCount+" connexions. "+JSON.stringify(d.connectionsData).slice(0,300)});}catch(e){setStatus({type:"error",msg:"Debug err: "+e.message});}}} style={{padding:"8px 14px",background:"#475569",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Debug</button>
+            <button onClick={async()=>{const cr=allData.libreCreds;if(!cr||!cr.token){setStatus({type:"error",msg:"Pas de connexion Libre active. Reconnectez-vous."});return;}try{const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"libre_debug",token:cr.token,patientId:cr.patientId,region:cr.region,accountId:cr.accountId})});const d=await r.json();setStatus({type:"info",msg:"DEBUG: "+d.connectionCount+" connexions. "+JSON.stringify(d.connectionsData).slice(0,300)});}catch(e){setStatus({type:"error",msg:"Debug err: "+e.message});}}} style={{padding:"8px 14px",background:"#475569",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Debug</button>
             <button onClick={async()=>{setStatus({type:"info",msg:"Recuperation historique..."});try{const h=await libreGetHistory(creds.token,creds.patientId,creds.region,creds.accountId);const byDay=groupReadingsByDay(h.readings||[]);const newDays={...(allData.days||{})};Object.keys(byDay).forEach(dk=>{newDays[dk]={...(newDays[dk]||{}),dexcomCurve:byDay[dk]};});saveAll({...allData,days:newDays});setStatus({type:"ok",msg:(h.count||0)+" mesures historiques importees"});}catch(e){setStatus({type:"error",msg:"Erreur: "+e.message});}}} style={{padding:"8px 16px",background:"#7e22ce",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Historique</button>
             <OBtn onClick={disconnect} color={C.red} small>Deconnecter</OBtn>
           </div>
@@ -861,7 +865,7 @@ function DexcomLive({allData,saveAll,cfg}){
       window.history.replaceState({},"","/");
       setStatus({type:"info",msg:"Connexion en cours..."});
       dexcomExchangeCode(code).then(tkns=>{
-        saveAll({...allData,dexcomOAuth:tkns});
+        saveAll({...allData,dexcomOAuth:tkns,libreCreds:undefined});
         setStatus({type:"ok",msg:"Connecte ! Synchronisation en cours..."});
         setTimeout(()=>doSync(tkns),500);
       }).catch(e=>{
@@ -923,7 +927,7 @@ function DexcomLive({allData,saveAll,cfg}){
         {lastSync&&<div style={{fontSize:11,color:C.muted,marginBottom:10}}>{"Derniere synchro: "+lastSync.toLocaleString("fr-FR")}</div>}
         <div style={{display:"flex",gap:8}}>
           <PBtn onClick={()=>doSync(creds)} color={C.green} full>Synchroniser maintenant</PBtn>
-            <button onClick={async()=>{try{const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"libre_debug",token:creds.token,patientId:creds.patientId,region:creds.region,accountId:creds.accountId})});const d=await r.json();setStatus({type:"info",msg:"DEBUG: "+d.connectionCount+" connexions. "+JSON.stringify(d.connectionsData).slice(0,300)});}catch(e){setStatus({type:"error",msg:"Debug err: "+e.message});}}} style={{padding:"8px 14px",background:"#475569",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Debug</button>
+            <button onClick={async()=>{const cr=allData.libreCreds;if(!cr||!cr.token){setStatus({type:"error",msg:"Pas de connexion Libre active. Reconnectez-vous."});return;}try{const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"libre_debug",token:cr.token,patientId:cr.patientId,region:cr.region,accountId:cr.accountId})});const d=await r.json();setStatus({type:"info",msg:"DEBUG: "+d.connectionCount+" connexions. "+JSON.stringify(d.connectionsData).slice(0,300)});}catch(e){setStatus({type:"error",msg:"Debug err: "+e.message});}}} style={{padding:"8px 14px",background:"#475569",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Debug</button>
             <button onClick={async()=>{setStatus({type:"info",msg:"Recuperation historique..."});try{const h=await libreGetHistory(creds.token,creds.patientId,creds.region,creds.accountId);const byDay=groupReadingsByDay(h.readings||[]);const newDays={...(allData.days||{})};Object.keys(byDay).forEach(dk=>{newDays[dk]={...(newDays[dk]||{}),dexcomCurve:byDay[dk]};});saveAll({...allData,days:newDays});setStatus({type:"ok",msg:(h.count||0)+" mesures historiques importees"});}catch(e){setStatus({type:"error",msg:"Erreur: "+e.message});}}} style={{padding:"8px 16px",background:"#7e22ce",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Historique</button>
           <OBtn onClick={disconnect} color={C.red} small>Deconnecter</OBtn>
         </div>
