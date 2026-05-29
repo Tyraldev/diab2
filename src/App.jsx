@@ -429,14 +429,6 @@ async function libreGetHistory(token, patientId) {
   return d.readings || [];
 }
 
-async function libreGetHistory(token, patientId, region, accountId) {
-  const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"libre_history",token,patientId,region:region||"",accountId:accountId||""})});
-  const d = await r.json();
-  if(d.error) throw new Error(d.error);
-  return d;
-}
-
 function groupReadingsByDay(readings) {
   const byDay = {};
   readings.forEach(p => {
