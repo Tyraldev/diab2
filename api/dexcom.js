@@ -48,7 +48,7 @@ function libreReq(method, path, body, token) {
     const headers = {
       "Content-Type": "application/json;charset=UTF-8",
       "User-Agent": "Mozilla/5.0 (iPhone; CPU OS 17_4.1 like Mac OS X) AppleWebKit/536.26 (KHTML, like Gecko) Version/17.4.1 Mobile/10A5355d Safari/8536.25",
-      "version": "4.10.0",
+      "version": "4.16.0",
       "product": "llu.ios",
     };
     if (token) headers["Authorization"] = "Bearer " + token;
