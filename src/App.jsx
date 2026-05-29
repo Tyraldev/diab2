@@ -412,9 +412,9 @@ async function libreGetConnections(token) {
   return d.connections || [];
 }
 
-async function libreGetReadings(token, patientId) {
+async function libreGetReadings(token, patientId, region) {
   const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"libre_readings",token,patientId})});
+    body:JSON.stringify({action:"libre_readings",token,patientId,region:region||""})});
   const d = await r.json();
   if(d.error && d.code==="TOKEN_EXPIRED") throw new Error("TOKEN_EXPIRED");
   if(d.error) throw new Error(d.error);
@@ -453,7 +453,7 @@ function LibreLive({allData, saveAll, cfg}) {
 
   const doSync = async(c) => {
     try {
-      const data = await libreGetReadings(c.token, c.patientId);
+      const data = await libreGetReadings(c.token, c.patientId, c.region);
       const readings = data.readings || [];
       const current = data.current;
       const byDay = groupReadingsByDay(readings);
@@ -502,7 +502,7 @@ function LibreLive({allData, saveAll, cfg}) {
 
       if(!pid) throw new Error("Aucun capteur trouve sur ce compte LibreView");
 
-      const c = {token: auth.token, patientId: pid, username, name: auth.name||username};
+      const c = {token: auth.token, patientId: pid, username, name: auth.name||username, region: auth.region||""};
 
       // Sync readings
       setStatus({type:"info", msg:"Recuperation des donnees..."});
