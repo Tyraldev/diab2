@@ -40,15 +40,15 @@ function get(path, token) {
 
 
 // ── LIBREVIEW API ─────────────────────────────────────────────────────────────
-const LIBRE_HOST = "api-eu.libreview.io";
+let LIBRE_HOST = "api-eu.libreview.io";
 
 function libreReq(method, path, body, token) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
     const headers = {
-      "Content-Type": "application/json",
-      "domain": "Libreview",
-      "version": "4.7",
+      "Content-Type": "application/json;charset=UTF-8",
+      "User-Agent": "Mozilla/5.0 (iPhone; CPU OS 17_4.1 like Mac OS X) AppleWebKit/536.26 (KHTML, like Gecko) Version/17.4.1 Mobile/10A5355d Safari/8536.25",
+      "version": "4.10.0",
       "product": "llu.ios",
     };
     if (token) headers["Authorization"] = "Bearer " + token;
@@ -74,28 +74,28 @@ async function handleLibre(action, body, res) {
   const { username, password, token, patientId } = body;
   
   if (action === "libre_login") {
-    // Try new LLU API first
+    // Try LLU login API
     let r = await libreReq("POST", "/llu/auth/login", { email: username, password }, null);
-    if (r.status === 200 && r.data.data && r.data.data.authTicket) {
+    // Handle region redirect (e.g. EU -> FR)
+    if (r.data && r.data.data && r.data.data.redirect) {
+      const newRegion = r.data.data.region || "fr";
+      LIBRE_HOST = "api-" + newRegion.toLowerCase() + ".libreview.io";
+      r = await libreReq("POST", "/llu/auth/login", { email: username, password }, null);
+    }
+    if (r.status === 200 && r.data && r.data.data && r.data.data.authTicket) {
       const d = r.data.data;
       return res.status(200).json({
         token: d.authTicket.token,
         patientId: d.user ? d.user.id : "",
-        name: d.user ? (d.user.firstName + " " + d.user.lastName) : username
+        name: d.user ? (d.user.firstName + " " + d.user.lastName) : username,
+        region: LIBRE_HOST
       });
     }
-    // Fallback old API
-    r = await libreReq("POST", "/lsl/api/nisperson/getauthenticateduser", {
-      Domain: "Libreview", GatewayType: "LinkUp.Android", Password: password, UserName: username
-    }, null);
-    if (r.status === 200 && r.data.result) {
-      const d = r.data.result;
-      return res.status(200).json({ token: d.UserToken, patientId: d.AccountId, name: d.FirstName+" "+d.LastName });
-    }
-    return res.status(401).json({ error: "Identifiants LibreView incorrects: " + JSON.stringify(r.data).slice(0,200) });
+    return res.status(401).json({ error: "Identifiants LibreView incorrects: " + JSON.stringify(r.data).slice(0,300) });
   }
 
   if (action === "libre_connections") {
+    if (body.region) LIBRE_HOST = body.region;
     const r = await libreReq("GET", "/llu/connections", null, token);
     if (r.status !== 200) return res.status(r.status).json({ error: "Connections: "+JSON.stringify(r.data).slice(0,200) });
     const conns = r.data.data || [];
@@ -103,6 +103,7 @@ async function handleLibre(action, body, res) {
   }
 
   if (action === "libre_readings") {
+    if (body.region) LIBRE_HOST = body.region;
     const r = await libreReq("GET", "/llu/connections/"+patientId+"/graph", null, token);
     if (r.status === 401) return res.status(401).json({ error: "TOKEN_EXPIRED", code: "TOKEN_EXPIRED" });
     if (r.status !== 200) return res.status(r.status).json({ error: "Readings: "+JSON.stringify(r.data).slice(0,200) });
