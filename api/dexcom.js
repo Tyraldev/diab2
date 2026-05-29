@@ -124,8 +124,8 @@ async function handleLibre(action, body, res) {
 
   if (action === "libre_readings") {
     if (body.region) LIBRE_HOST = body.region;
-    if (!token) return res.status(400).json({error:"No token provided", hasToken:!!token, bodyKeys:Object.keys(body)});
-    if (!patientId) return res.status(400).json({error:"No patientId provided"});
+    if (!token) return res.status(400).json({error:"[LIBRE] No token provided"});
+    if (!patientId) return res.status(400).json({error:"[LIBRE] No patientId provided"});
     const r = await libreReq("GET", "/llu/connections/"+patientId+"/graph", null, token, body.accountId);
     if (r.status === 401) return res.status(401).json({ error: "TOKEN_EXPIRED", code: "TOKEN_EXPIRED" });
     if (r.status !== 200) return res.status(r.status).json({ error: "Readings: "+JSON.stringify(r.data).slice(0,200) });
