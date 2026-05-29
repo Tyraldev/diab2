@@ -391,13 +391,13 @@ function CorrectifBlock({entries,onAdd,onDelete,cfg}){
 //    LIBREVIEW API                                                              
 async function libreLogin(username, password) {
   // Try new API first, then fallback to old
-  let r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"login2",username,password})});
+  let r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"libre_login",username,password})});
   let d = await r.json();
   if(d.error || !d.token) {
     // Fallback to old API
-    r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({action:"login",username,password})});
+    r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"libre_login",username,password})});
     d = await r.json();
     if(d.error) throw new Error(d.error);
   }
@@ -405,16 +405,16 @@ async function libreLogin(username, password) {
 }
 
 async function libreGetConnections(token) {
-  const r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"connections",token})});
+  const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"libre_connections",token})});
   const d = await r.json();
   if(d.error) throw new Error(d.error);
   return d.connections || [];
 }
 
 async function libreGetReadings(token, patientId) {
-  const r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"readings",token,patientId})});
+  const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"libre_readings",token,patientId})});
   const d = await r.json();
   if(d.error && d.code==="TOKEN_EXPIRED") throw new Error("TOKEN_EXPIRED");
   if(d.error) throw new Error(d.error);
@@ -422,7 +422,7 @@ async function libreGetReadings(token, patientId) {
 }
 
 async function libreGetHistory(token, patientId) {
-  const r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
+  const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({action:"history",token,patientId})});
   const d = await r.json();
   if(d.error) throw new Error(d.error);
@@ -648,7 +648,7 @@ async function dexcomExchangeCode(code){
   return d;
 }
 async function dexcomReadingsAPI(accessToken){
-  const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"readings",accessToken})});
+  const r=await fetch("/api/dexcom",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"libre_readings",accessToken})});
   const d=await r.json();
   if(d.error&&d.code==="TOKEN_EXPIRED")throw new Error("TOKEN_EXPIRED");
   if(d.error)throw new Error(d.error);
