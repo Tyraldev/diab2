@@ -131,6 +131,22 @@ async function handleLibre(action, body, res) {
     });
   }
 
+  if (action === "libre_history") {
+    if (body.region) LIBRE_HOST = body.region;
+    // Try logbook endpoint
+    const r = await libreReq("GET", "/llu/connections/"+patientId+"/logbook", null, token, body.accountId);
+    if (r.status === 401) return res.status(401).json({ error: "TOKEN_EXPIRED", code: "TOKEN_EXPIRED" });
+    if (r.status !== 200) return res.status(r.status).json({ error: "History: "+JSON.stringify(r.data).slice(0,300) });
+    const data = r.data.data || [];
+    const readings = (Array.isArray(data) ? data : [])
+      .filter(p => p.ValueInMgPerDl)
+      .map(p => {
+        const dt = new Date(p.Timestamp);
+        return { time: dt.toTimeString().slice(0,5), value: mgToGL(p.ValueInMgPerDl), ts: dt.toISOString(), trend: litrend(p.TrendArrow) };
+      });
+    return res.status(200).json({ readings, count: readings.length });
+  }
+
   return res.status(400).json({ error: "Unknown libre action: "+action });
 }
 
