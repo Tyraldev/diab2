@@ -387,6 +387,196 @@ function CorrectifBlock({entries,onAdd,onDelete,cfg}){
   </div>);
 }
 
+
+//    LIBREVIEW API                                                              
+async function libreLogin(username, password) {
+  // Try new API first, then fallback to old
+  let r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"login2",username,password})});
+  let d = await r.json();
+  if(d.error || !d.token) {
+    // Fallback to old API
+    r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"login",username,password})});
+    d = await r.json();
+    if(d.error) throw new Error(d.error);
+  }
+  return d;
+}
+
+async function libreGetConnections(token) {
+  const r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"connections",token})});
+  const d = await r.json();
+  if(d.error) throw new Error(d.error);
+  return d.connections || [];
+}
+
+async function libreGetReadings(token, patientId) {
+  const r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"readings",token,patientId})});
+  const d = await r.json();
+  if(d.error && d.code==="TOKEN_EXPIRED") throw new Error("TOKEN_EXPIRED");
+  if(d.error) throw new Error(d.error);
+  return d;
+}
+
+async function libreGetHistory(token, patientId) {
+  const r = await fetch("/api/libre", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"history",token,patientId})});
+  const d = await r.json();
+  if(d.error) throw new Error(d.error);
+  return d.readings || [];
+}
+
+function groupReadingsByDay(readings) {
+  const byDay = {};
+  readings.forEach(p => {
+    const dk = p.ts.slice(0,10);
+    if(!byDay[dk]) byDay[dk] = [];
+    byDay[dk].push(p);
+  });
+  return byDay;
+}
+
+function LibreLive({allData, saveAll, cfg}) {
+  const [open, setOpen] = useState(false);
+  const [username, setUsername] = useState((allData.libreCreds&&allData.libreCreds.username)||"");
+  const [password, setPassword] = useState("");
+  const [status, setStatus] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [lastSync, setLastSync] = useState(null);
+  const intervalRef = useRef(null);
+
+  const creds = allData.libreCreds || null;
+  const isConnected = !!(creds && creds.token && creds.patientId);
+
+  const doSync = async(c) => {
+    try {
+      const data = await libreGetReadings(c.token, c.patientId);
+      const readings = data.readings || [];
+      const current = data.current;
+      const byDay = groupReadingsByDay(readings);
+      const newDays = {...(allData.days||{})};
+      Object.keys(byDay).forEach(dk => {
+        newDays[dk] = {...(newDays[dk]||{}), dexcomCurve: byDay[dk]};
+      });
+      // Save current reading for today
+      if(current && byDay[TODAY()]) {
+        newDays[TODAY()] = {...(newDays[TODAY()]||{}), livreCurrent: current};
+      }
+      saveAll({...allData, days:newDays, libreCreds:c});
+      setLastSync(new Date());
+      setStatus({type:"ok", msg:readings.length+" mesures synchronisees"+(current?" - actuelle: "+current.value+" g/L "+current.trend:"")});
+    } catch(e) {
+      if(e.message==="TOKEN_EXPIRED") {
+        setStatus({type:"error", msg:"Session expiree - reconnectez-vous"});
+      } else {
+        setStatus({type:"error", msg:"Erreur: "+e.message});
+      }
+    }
+  };
+
+  useEffect(() => {
+    if(isConnected) {
+      doSync(creds);
+      intervalRef.current = setInterval(() => doSync(creds), 5*60*1000);
+    }
+    return () => { if(intervalRef.current) clearInterval(intervalRef.current); };
+  }, []);
+
+  const connect = async() => {
+    if(!username||!password) return;
+    setLoading(true);
+    setStatus({type:"info", msg:"Connexion a LibreView..."});
+    try {
+      const auth = await libreLogin(username, password);
+      setStatus({type:"info", msg:"Recherche du capteur..."});
+
+      // Get patient connections
+      let pid = auth.patientId;
+      if(!pid) {
+        const conns = await libreGetConnections(auth.token);
+        if(conns.length > 0) pid = conns[0].id;
+      }
+
+      if(!pid) throw new Error("Aucun capteur trouve sur ce compte LibreView");
+
+      const c = {token: auth.token, patientId: pid, username, name: auth.name||username};
+
+      // Sync readings
+      setStatus({type:"info", msg:"Recuperation des donnees..."});
+      await doSync(c);
+      saveAll({...allData, libreCreds: c});
+      setOpen(false);
+
+      // Setup auto-refresh
+      if(intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = setInterval(() => doSync(c), 5*60*1000);
+
+    } catch(e) {
+      setStatus({type:"error", msg:"Erreur: "+e.message});
+    }
+    setLoading(false);
+  };
+
+  const disconnect = () => {
+    if(intervalRef.current) clearInterval(intervalRef.current);
+    const nd = {...allData};
+    delete nd.libreCreds;
+    saveAll(nd);
+    setStatus(null);
+    setLastSync(null);
+    setPassword("");
+  };
+
+  const todayCurve = allData.days&&allData.days[TODAY()]&&allData.days[TODAY()].dexcomCurve;
+  const lastGly = todayCurve&&todayCurve.length>0 ? todayCurve[todayCurve.length-1] : null;
+
+  return(
+    <div style={{borderRadius:14,border:"2px solid "+(isConnected ? C.green : "#e040fb"),background:isConnected ? "#f0fdf4" : "#fdf4ff",marginBottom:12}}>
+      <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{background:isConnected ? C.green : "#e040fb",color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>{isConnected ? "LIVE" : "Libre"}</span>
+          <div>
+            <div style={{fontWeight:700,color:C.text,fontSize:15}}>FreeStyle Libre - Temps reel</div>
+            <div style={{fontSize:12,color:C.muted}}>{isConnected ? (lastGly ? "Derniere: "+lastGly.value+" g/L "+lastGly.trend+(lastSync?" - sync "+lastSync.toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"") : "Connecte") : "Connexion via votre compte LibreView"}</div>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {isConnected&&lastGly&&<span style={{fontWeight:800,fontSize:18,color:glyColor(lastGly.value,cfg)}}>{lastGly.value+" g/L"}</span>}
+          {isConnected&&<button onClick={e=>{e.stopPropagation();doSync(creds);}} style={{padding:"4px 10px",background:C.green,color:"white",border:"none",borderRadius:6,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Sync</button>}
+          <span style={{color:C.muted}}>{open ? "^" : "v"}</span>
+        </div>
+      </div>
+      {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #e9d5ff"}}>
+        {!isConnected ? (<div>
+          <div style={{background:"#f3e8ff",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#7e22ce"}}>
+            Utilisez vos identifiants <strong>LibreView</strong> (libreview.com) - les memes que l app FreeStyle LibreLink.
+          </div>
+          <div style={{marginBottom:10}}><Lbl>Email LibreView</Lbl><TInput value={username} onChange={setUsername} placeholder="votre@email.com"/></div>
+          <div style={{marginBottom:12}}>
+            <Lbl>Mot de passe</Lbl>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Mot de passe" style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,fontFamily:"inherit",boxSizing:"border-box"}}/>
+          </div>
+          <PBtn onClick={connect} disabled={loading||!username||!password} color={"#e040fb"} full>{loading ? "Connexion..." : "Se connecter a LibreView"}</PBtn>
+        </div>) : (<div>
+          <div style={{background:"#f0fdf4",border:"1px solid #86efac",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:C.green}}>
+            <strong>Connecte : </strong>{creds.name||creds.username}<br/>
+            Synchro automatique toutes les 5 minutes.
+          </div>
+          {lastSync&&<div style={{fontSize:11,color:C.muted,marginBottom:10}}>{"Derniere synchro: "+lastSync.toLocaleString("fr-FR")}</div>}
+          <div style={{display:"flex",gap:8}}>
+            <PBtn onClick={()=>doSync(creds)} color={C.green} full>Synchroniser maintenant</PBtn>
+            <OBtn onClick={disconnect} color={C.red} small>Deconnecter</OBtn>
+          </div>
+        </div>)}
+        {status&&<div style={{marginTop:10,padding:"8px 12px",borderRadius:8,fontSize:13,background:status.type==="error" ? "#fef2f2" : status.type==="ok" ? "#f0fdf4" : "#fdf4ff",color:status.type==="error" ? C.red : status.type==="ok" ? C.green : "#7e22ce",border:"1px solid "+(status.type==="error" ? "#fca5a5" : status.type==="ok" ? "#86efac" : "#e9d5ff")}}>{status.msg}</div>}
+      </div>)}
+    </div>
+  );
+}
+
 function ConfigPanel({cfg,onSave,allData}){
   const [open,setOpen]=useState(false);
   const [tMin,setTMin]=useState(String(cfg.tMin));
@@ -896,6 +1086,7 @@ export default function App(){
 
     {tab==="params"&&(<div style={{padding:"16px 14px 40px"}}>
       <h2 style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:16}}>Parametres</h2>
+      <LibreLive allData={allData} saveAll={saveAll} cfg={cfg}/>
       <ConfigPanel cfg={cfg} onSave={c=>saveAll({...allData,cfg:{...cfg,...c}})} allData={allData}/>
       <div style={{borderRadius:14,border:"1.5px solid "+C.blue,background:"#eff6ff",marginBottom:12,padding:"14px 16px"}}>
         <div style={{fontWeight:700,color:C.blue,fontSize:15,marginBottom:4}}>Connexion Dexcom</div>
