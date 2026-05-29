@@ -38,6 +38,18 @@ const fmtShort=s=>{const d=new Date(s+"T12:00:00");return{wd:d.toLocaleDateStrin
 const f2b64=f=>new Promise((r,j)=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.onerror=j;fr.readAsDataURL(f);});
 function glyColor(v,cfg){if(!v)return C.muted;const n=parseFloat(v),mn=(cfg||DEF).tMin,mx=(cfg||DEF).tMax;if(n<0.7)return C.red;if(n>=mn&&n<=mx)return C.green;if(n<=mx+0.3)return C.orange;return C.red;}
 function glyLabel(v,cfg){if(!v)return "";const n=parseFloat(v),mn=(cfg||DEF).tMin,mx=(cfg||DEF).tMax;if(n<0.7)return "Hypo";if(n>=mn&&n<=mx)return "Dans la cible";if(n<mn)return "En dessous";if(n<=mx+0.3)return "Acceptable";return "Au-dessus";}
+
+// Normalise la glycemie: 140 -> 1.40, 90 -> 0.90, 1.40 reste 1.40
+function normalizeGly(raw) {
+  if (raw === "" || raw === null || raw === undefined) return "";
+  let s = String(raw).replace(",", ".").trim();
+  let n = parseFloat(s);
+  if (isNaN(n)) return raw;
+  // Si > 20, c'est forcement en mg/dL (ex: 140) -> diviser par 100
+  if (n > 20) return (n / 100).toFixed(2);
+  return s;
+}
+
 function getClosestGly(curve,timeStr){if(!curve||!curve.length)return null;const[h,m]=timeStr.split(":").map(Number);const tMin=h*60+m;let best=null,bestDiff=Infinity;curve.forEach(p=>{const[ph,pm]=p.time.split(":").map(Number);const diff=Math.abs(ph*60+pm-tMin);if(diff<bestDiff&&diff<=30){bestDiff=diff;best=p;}});return best;}
 
 function parseJSON(txt){
@@ -155,36 +167,86 @@ function parseDexcomCSV(text){
 }
 
 const FOOD_DB=[
+  // Feculents / pain
   {kw:["pain","baguette","tartine"],g:15,def:2,unit:"tranche",label:"pain"},
-  {kw:["pain complet","pain de mie"],g:12,def:2,unit:"tranche",label:"pain complet"},
-  {kw:["pates","spaghetti","macaroni","penne"],g:50,def:1,unit:"portion",label:"pates cuites"},
-  {kw:["riz"],g:45,def:1,unit:"portion",label:"riz cuit"},
-  {kw:["pomme de terre","patate","puree"],g:30,def:1,unit:"portion",label:"pommes de terre"},
-  {kw:["frites"],g:45,def:1,unit:"portion",label:"frites"},
-  {kw:["semoule","couscous","quinoa"],g:45,def:1,unit:"portion",label:"feculents"},
-  {kw:["lentilles","haricots","pois chiches"],g:30,def:1,unit:"portion",label:"legumineuses"},
-  {kw:["cereales","muesli","corn flakes"],g:30,def:1,unit:"bol",label:"cereales"},
+  {kw:["pain complet","pain de mie","pain de seigle","pain aux cereales"],g:12,def:2,unit:"tranche",label:"pain complet"},
+  {kw:["pain grille","biscotte"],g:8,def:2,unit:"piece",label:"biscotte"},
+  {kw:["pates","spaghetti","macaroni","penne","tagliatelle","ravioli"],g:50,def:1,unit:"portion",label:"pates cuites"},
+  {kw:["riz","risotto"],g:45,def:1,unit:"portion",label:"riz cuit"},
+  {kw:["pomme de terre","patate","puree","gratin dauphinois"],g:30,def:1,unit:"portion",label:"pommes de terre"},
+  {kw:["frites","pommes noisettes"],g:45,def:1,unit:"portion",label:"frites"},
+  {kw:["semoule","couscous","boulgour"],g:45,def:1,unit:"portion",label:"semoule"},
+  {kw:["quinoa"],g:40,def:1,unit:"portion",label:"quinoa"},
+  {kw:["lentilles","haricots blancs","haricots rouges","pois chiches","flageolets"],g:30,def:1,unit:"portion",label:"legumineuses"},
+  {kw:["cereales","muesli","corn flakes","granola"],g:30,def:1,unit:"bol",label:"cereales"},
+  {kw:["porridge","flocons avoine"],g:25,def:1,unit:"bol",label:"porridge"},
+  {kw:["polenta"],g:35,def:1,unit:"portion",label:"polenta"},
+  // Viennoiseries / patisseries
   {kw:["croissant"],g:25,def:1,unit:"piece",label:"croissant"},
   {kw:["pain au chocolat","chocolatine"],g:30,def:1,unit:"piece",label:"pain au chocolat"},
-  {kw:["biscuit","cookie","gateau sec"],g:8,def:2,unit:"piece",label:"biscuit"},
-  {kw:["gateau"],g:35,def:1,unit:"part",label:"gateau"},
+  {kw:["pain aux raisins","chausson"],g:35,def:1,unit:"piece",label:"viennoiserie"},
+  {kw:["brioche"],g:25,def:1,unit:"tranche",label:"brioche"},
+  {kw:["biscuit","cookie","gateau sec","petit beurre"],g:8,def:2,unit:"piece",label:"biscuit"},
+  {kw:["gateau","part de gateau","fondant"],g:35,def:1,unit:"part",label:"gateau"},
+  {kw:["tarte","tarte aux pommes","tarte au citron"],g:40,def:1,unit:"part",label:"tarte"},
+  {kw:["crepe","galette"],g:20,def:1,unit:"piece",label:"crepe"},
+  {kw:["gaufre"],g:25,def:1,unit:"piece",label:"gaufre"},
+  {kw:["pancake"],g:15,def:1,unit:"piece",label:"pancake"},
+  {kw:["madeleine","financier"],g:12,def:1,unit:"piece",label:"madeleine"},
+  {kw:["macaron"],g:10,def:1,unit:"piece",label:"macaron"},
+  {kw:["eclair","religieuse"],g:30,def:1,unit:"piece",label:"patisserie"},
+  // Sucre / sucreries
   {kw:["sucre","morceau de sucre"],g:5,def:1,unit:"morceau",label:"sucre"},
-  {kw:["confiture","miel"],g:12,def:1,unit:"cuillere",label:"confiture"},
-  {kw:["chocolat"],g:5,def:2,unit:"carre",label:"chocolat"},
+  {kw:["confiture","miel","pate a tartiner","nutella"],g:12,def:1,unit:"cuillere",label:"confiture"},
+  {kw:["chocolat","carre de chocolat"],g:5,def:2,unit:"carre",label:"chocolat"},
+  {kw:["bonbon","caramel"],g:5,def:3,unit:"piece",label:"bonbon"},
+  {kw:["barre chocolatee","mars","snickers","kinder"],g:25,def:1,unit:"barre",label:"barre chocolatee"},
+  {kw:["glace","creme glacee","sorbet"],g:20,def:1,unit:"boule",label:"glace"},
+  // Fruits
   {kw:["pomme"],g:20,def:1,unit:"piece",label:"pomme"},
   {kw:["banane"],g:25,def:1,unit:"piece",label:"banane"},
-  {kw:["orange"],g:15,def:1,unit:"piece",label:"orange"},
+  {kw:["orange","clementine","mandarine"],g:15,def:1,unit:"piece",label:"orange"},
   {kw:["poire"],g:20,def:1,unit:"piece",label:"poire"},
-  {kw:["fraise","framboise","fruits rouges"],g:10,def:1,unit:"portion",label:"fruits rouges"},
-  {kw:["jus de fruit","jus d orange"],g:25,def:1,unit:"verre",label:"jus de fruit"},
-  {kw:["yaourt","yogourt"],g:10,def:1,unit:"pot",label:"yaourt"},
-  {kw:["lait"],g:12,def:1,unit:"verre",label:"lait"},
-  {kw:["fromage blanc"],g:8,def:1,unit:"portion",label:"fromage blanc"},
-  {kw:["soda","coca","limonade"],g:25,def:1,unit:"verre",label:"boisson sucree"},
+  {kw:["peche","nectarine","abricot"],g:12,def:1,unit:"piece",label:"peche"},
+  {kw:["raisin","grappe"],g:25,def:1,unit:"portion",label:"raisin"},
+  {kw:["fraise","framboise","myrtille","fruits rouges","mure"],g:10,def:1,unit:"portion",label:"fruits rouges"},
+  {kw:["kiwi"],g:10,def:1,unit:"piece",label:"kiwi"},
+  {kw:["ananas","mangue"],g:20,def:1,unit:"portion",label:"fruit exotique"},
+  {kw:["melon","pasteque"],g:15,def:1,unit:"part",label:"melon"},
+  {kw:["cerise"],g:15,def:1,unit:"portion",label:"cerises"},
+  {kw:["prune","mirabelle"],g:10,def:2,unit:"piece",label:"prune"},
+  {kw:["datte","figue"],g:15,def:2,unit:"piece",label:"datte"},
+  {kw:["compote"],g:15,def:1,unit:"pot",label:"compote"},
+  // Boissons
+  {kw:["jus de fruit","jus d orange","jus de pomme","jus de raisin"],g:25,def:1,unit:"verre",label:"jus de fruit"},
+  {kw:["soda","coca","limonade","ice tea","fanta","sprite"],g:25,def:1,unit:"verre",label:"boisson sucree"},
+  {kw:["sirop","grenadine","menthe"],g:15,def:1,unit:"verre",label:"sirop"},
+  {kw:["biere"],g:12,def:1,unit:"verre",label:"biere"},
+  {kw:["vin"],g:3,def:1,unit:"verre",label:"vin"},
+  {kw:["smoothie","milkshake"],g:30,def:1,unit:"verre",label:"smoothie"},
+  // Laitiers
+  {kw:["yaourt","yogourt","yaourt nature"],g:6,def:1,unit:"pot",label:"yaourt nature"},
+  {kw:["yaourt aux fruits","yaourt sucre"],g:15,def:1,unit:"pot",label:"yaourt aux fruits"},
+  {kw:["lait"],g:10,def:1,unit:"verre",label:"lait"},
+  {kw:["fromage blanc","faisselle"],g:6,def:1,unit:"portion",label:"fromage blanc"},
+  {kw:["creme dessert","danette","liegeois"],g:20,def:1,unit:"pot",label:"creme dessert"},
+  {kw:["riz au lait","semoule au lait"],g:30,def:1,unit:"pot",label:"riz au lait"},
+  // Plats
   {kw:["pizza"],g:30,def:2,unit:"part",label:"pizza"},
-  {kw:["sandwich"],g:50,def:1,unit:"piece",label:"sandwich"},
-  {kw:["burger","hamburger"],g:40,def:1,unit:"piece",label:"burger"},
-  {kw:["soupe","potage"],g:15,def:1,unit:"bol",label:"soupe"},
+  {kw:["sandwich","casse-croute"],g:50,def:1,unit:"piece",label:"sandwich"},
+  {kw:["burger","hamburger","cheeseburger"],g:40,def:1,unit:"piece",label:"burger"},
+  {kw:["quiche","tarte salee"],g:25,def:1,unit:"part",label:"quiche"},
+  {kw:["soupe","potage","veloute"],g:15,def:1,unit:"bol",label:"soupe"},
+  {kw:["lasagne","gratin"],g:35,def:1,unit:"portion",label:"lasagne"},
+  {kw:["hot dog"],g:35,def:1,unit:"piece",label:"hot dog"},
+  {kw:["nems","samoussa","beignet"],g:15,def:2,unit:"piece",label:"beignet frit"},
+  {kw:["tacos","wrap","kebab","galette"],g:45,def:1,unit:"piece",label:"tacos/wrap"},
+  {kw:["sushi","maki"],g:8,def:6,unit:"piece",label:"sushi"},
+  {kw:["pates carbonara","gratin de pates"],g:55,def:1,unit:"portion",label:"plat de pates"},
+  // Legumes (faible glucide mais comptes)
+  {kw:["mais","petits pois"],g:15,def:1,unit:"portion",label:"mais/petits pois"},
+  {kw:["carotte","betterave"],g:8,def:1,unit:"portion",label:"carottes"},
+  {kw:["soupe de legumes"],g:12,def:1,unit:"bol",label:"soupe legumes"},
 ];
 const NUM_WORDS={un:1,une:1,deux:2,trois:3,quatre:4,cinq:5,six:6,sept:7,huit:8,demi:0.5};
 function estimateCarbsLocal(text){
@@ -214,7 +276,7 @@ function Pill({color,children}){return <span style={{background:"rgba(0,0,0,0.06
 function PBtn({onClick,color,children,disabled,full,small}){return <button onClick={onClick} disabled={disabled} style={{width:full ? "100%" : "auto",padding:small ? "6px 12px" : "10px 18px",background:disabled ? "#ccc" : color,color:"white",border:"none",borderRadius:10,fontWeight:700,fontSize:small ? 12 : 14,cursor:disabled ? "not-allowed" : "pointer",fontFamily:"inherit"}}>{children}</button>;}
 function OBtn({onClick,color,children,small}){return <button onClick={onClick} style={{padding:small ? "5px 12px" : "8px 16px",background:"transparent",color,border:"2px solid "+color,borderRadius:8,fontWeight:700,fontSize:small ? 12 : 13,cursor:"pointer",fontFamily:"inherit"}}>{children}</button>;}
 function Lbl({children}){return <label style={{display:"block",color:C.muted,fontSize:11,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>{children}</label>;}
-function TInput({value,onChange,placeholder,type,step,min}){return <input type={type||"text"} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} step={step} min={min} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,color:C.text,fontFamily:"inherit",outline:"none",boxSizing:"border-box",background:"white"}}/>;}
+function TInput({value,onChange,onBlur,placeholder,type,step,min}){return <input type={type||"text"} value={value} onChange={e=>onChange(e.target.value)} onBlur={onBlur} placeholder={placeholder} step={step} min={min} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,color:C.text,fontFamily:"inherit",outline:"none",boxSizing:"border-box",background:"white"}}/>;}
 function TTime({value,onChange}){return <input type="time" value={value} onChange={e=>onChange(e.target.value)} style={{padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,color:C.text,fontFamily:"inherit"}}/>;}
 
 function DayCurve({pts,meals,cfg,width,height}){
@@ -305,7 +367,7 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}) {
         <div style={{fontWeight:700,color:C.purple,fontSize:12,marginBottom:8}}>Glycemie pre-prandiale</div>
         {glyAuto&&!glyMan&&<div style={{background:glyColor(glyAuto.value,cfg)+"11",border:"1px solid "+glyColor(glyAuto.value,cfg),borderRadius:8,padding:"7px 12px",marginBottom:8,display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:C.muted}}>{"Dexcom a "+glyAuto.time}</span><span style={{fontWeight:800,color:glyColor(glyAuto.value,cfg),fontSize:14}}>{glyAuto.value+" g/L"}</span></div>}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,alignItems:"end"}}>
-          <div><Lbl>{glyAuto ? "Valeur manuelle (override)" : "Valeur (g/L)"}</Lbl><TInput type="number" value={glyMan} onChange={setGlyMan} placeholder={glyAuto ? glyAuto.value : "ex: 1.40"} min="0" step="0.01"/></div>
+          <div><Lbl>{glyAuto ? "Valeur manuelle (override)" : "Valeur (g/L)"}</Lbl><TInput type="number" value={glyMan} onChange={setGlyMan} onBlur={()=>setGlyMan(normalizeGly(glyMan))} placeholder={glyAuto ? glyAuto.value : "ex: 1.40"} min="0" step="0.01"/></div>
           <div>{glyEff&&<div style={{padding:"9px 12px",background:glyColor(glyEff.toFixed(2),cfg)+"22",border:"1.5px solid "+glyColor(glyEff.toFixed(2),cfg),borderRadius:8,textAlign:"center"}}><div style={{fontSize:10,color:C.muted}}>{glyMan ? "Manuelle" : "Dexcom"}</div><div style={{fontWeight:800,color:glyColor(glyEff.toFixed(2),cfg),fontSize:14}}>{glyEff.toFixed(2)+" g/L"}</div></div>}</div>
         </div>
       </div>
@@ -335,6 +397,77 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}) {
       <div style={{display:"flex",gap:8,marginTop:12}}>
         <PBtn onClick={save} color={meal.color} full>Enregistrer</PBtn>
         {saved&&<OBtn onClick={()=>{onDelete();setOpen(false);}} color={C.red} small>Sup.</OBtn>}
+      </div>
+    </div>)}
+  </div>);
+}
+
+function ActivityBlock({entries,onAdd,onDelete,cfg}){
+  const [open,setOpen]=useState(false);
+  const [type,setType]=useState("modere");
+  const [activite,setActivite]=useState("");
+  const [time,setTime]=useState(nowTime());
+  const [duree,setDuree]=useState("");
+  const [glyAvant,setGlyAvant]=useState("");
+  const [note,setNote]=useState("");
+
+  const INTENSITES=[
+    {id:"leger",label:"Leger",color:C.green,desc:"marche, yoga, etirements"},
+    {id:"modere",label:"Modere",color:C.orange,desc:"velo, natation, jogging"},
+    {id:"intense",label:"Intense",color:C.red,desc:"course, HIIT, sport collectif"},
+  ];
+  const intDef=INTENSITES.find(i=>i.id===type)||INTENSITES[1];
+
+  // Estimation de l'impact glycemique
+  const dureeNum=parseFloat(duree)||0;
+  const impactFactors={leger:0.15,modere:0.30,intense:0.45};
+  const baisseEstimee=dureeNum>0 ? (impactFactors[type]*dureeNum/30).toFixed(2) : null;
+
+  // Conseils selon glycemie avant sport
+  let conseil=null;
+  if(glyAvant){
+    const g=parseFloat(glyAvant);
+    if(g<1.0) conseil={type:"danger",txt:"Glycemie basse ! Resucrez-vous (15g) avant de commencer."};
+    else if(g<1.5&&type!=="leger") conseil={type:"warn",txt:"Prenez une collation (15-20g) pour eviter l hypo pendant l effort."};
+    else if(g>2.5) conseil={type:"warn",txt:"Glycemie elevee. Verifiez les cetones avant un effort intense."};
+    else conseil={type:"ok",txt:"Glycemie adaptee pour demarrer l activite."};
+  }
+
+  const add=()=>{
+    if(!time||!dureeNum)return;
+    onAdd({id:Date.now()+"",type,activite,time,duree:dureeNum,glyAvant,baisseEstimee,note});
+    setActivite("");setDuree("");setGlyAvant("");setNote("");
+  };
+  const sorted=[...entries].sort((a,b)=>a.time.localeCompare(b.time));
+
+  return(<div style={{borderRadius:14,border:"1.5px solid "+(entries.length>0 ? "#0891b2" : C.border),background:entries.length>0 ? "#ecfeff" : "white",marginBottom:10}}>
+    <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{background:"#0891b2",color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>Sport</span>
+        <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Activite physique</div>
+          <div style={{fontSize:12,color:C.muted}}>{entries.length===0 ? "Impact sur la glycemie" : entries.length+" activite"+(entries.length>1 ? "s" : "")}</div>
+        </div>
+      </div><span style={{color:C.muted}}>{open ? "^" : "v"}</span>
+    </div>
+    {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #cffafe"}}>
+      {sorted.map(e=>{const id=INTENSITES.find(i=>i.id===e.type)||INTENSITES[1];return(<div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"white",borderRadius:8,marginBottom:6,border:"1px solid "+id.color+"44"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}><span style={{background:id.color,color:"white",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{id.label}</span>
+          <div><span style={{fontSize:13,fontWeight:600}}>{e.time}</span>{e.activite&&<span style={{marginLeft:6,fontSize:13}}>{e.activite}</span>}<span style={{marginLeft:6,fontSize:12,color:"#0891b2",fontWeight:700}}>{e.duree+" min"}</span>{e.baisseEstimee&&<span style={{marginLeft:6,fontSize:11,color:C.muted}}>{"~ -"+e.baisseEstimee+" g/L"}</span>}{e.note&&<span style={{marginLeft:6,fontSize:11,color:C.muted}}>{e.note}</span>}</div>
+        </div><button onClick={()=>onDelete(e.id)} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:16}}>x</button>
+      </div>);})}
+      <div style={{background:"white",borderRadius:10,padding:14,border:"1px solid "+C.border,marginTop:6}}>
+        <div style={{display:"flex",gap:6,marginBottom:12}}>{INTENSITES.map(i=><button key={i.id} onClick={()=>setType(i.id)} style={{flex:1,padding:"8px 4px",border:"2px solid "+(type===i.id ? i.color : C.border),borderRadius:8,background:type===i.id ? i.color : "transparent",color:type===i.id ? "white" : C.muted,cursor:"pointer",fontWeight:700,fontSize:12,fontFamily:"inherit"}}>{i.label}</button>)}</div>
+        <div style={{fontSize:11,color:C.muted,marginBottom:12,textAlign:"center"}}>{intDef.desc}</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div><Lbl>Heure</Lbl><TTime value={time} onChange={setTime}/></div>
+          <div><Lbl>Duree (min)</Lbl><TInput type="number" value={duree} onChange={setDuree} placeholder="ex: 45" min="0" step="5"/></div>
+        </div>
+        <div style={{marginBottom:10}}><Lbl>Activite (optionnel)</Lbl><TInput value={activite} onChange={setActivite} placeholder="ex: velo, natation..."/></div>
+        <div style={{marginBottom:10}}><Lbl>Glycemie avant (g/L)</Lbl><TInput type="number" value={glyAvant} onChange={setGlyAvant} onBlur={()=>setGlyAvant(normalizeGly(glyAvant))} placeholder="ex: 1.40" min="0" step="0.01"/></div>
+        {conseil&&<div style={{padding:"8px 12px",borderRadius:8,marginBottom:10,fontSize:12,fontWeight:600,background:conseil.type==="danger" ? "#fef2f2" : conseil.type==="warn" ? "#fffbeb" : "#f0fdf4",color:conseil.type==="danger" ? C.red : conseil.type==="warn" ? "#92400e" : C.green,border:"1px solid "+(conseil.type==="danger" ? "#fca5a5" : conseil.type==="warn" ? "#fcd34d" : "#86efac")}}>{conseil.txt}</div>}
+        {baisseEstimee&&<div style={{background:"#ecfeff",border:"1px solid #67e8f9",borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:"#0891b2"}}>Baisse glycemique estimee: <strong>{"~ -"+baisseEstimee+" g/L"}</strong> (effet pendant et apres l effort). Surveillez le risque d hypo jusqu a plusieurs heures apres.</div>}
+        <div style={{marginBottom:10}}><Lbl>Note</Lbl><TInput value={note} onChange={setNote} placeholder="ressenti, hypo pendant..."/></div>
+        <PBtn onClick={add} disabled={!dureeNum} color={"#0891b2"} full>Ajouter l activite</PBtn>
       </div>
     </div>)}
   </div>);
@@ -372,7 +505,7 @@ function CorrectifBlock({entries,onAdd,onDelete,cfg}){
         <div style={{display:"flex",gap:6,marginBottom:12}}>{TYPES.map(t=><button key={t.id} onClick={()=>setType(t.id)} style={{flex:1,padding:"7px 4px",border:"2px solid "+(type===t.id ? t.color : C.border),borderRadius:8,background:type===t.id ? t.color : "transparent",color:type===t.id ? "white" : C.muted,cursor:"pointer",fontWeight:700,fontSize:11,fontFamily:"inherit"}}>{t.label}</button>)}</div>
         <div style={{display:"grid",gridTemplateColumns:"100px 1fr",gap:10,marginBottom:10}}>
           <div><Lbl>Heure</Lbl><TTime value={time} onChange={setTime}/></div>
-          <div><Lbl>Glycemie (g/L)</Lbl><TInput type="number" value={gly} onChange={setGly} placeholder="ex: 2.10" min="0" step="0.01"/></div>
+          <div><Lbl>Glycemie (g/L)</Lbl><TInput type="number" value={gly} onChange={setGly} onBlur={()=>setGly(normalizeGly(gly))} placeholder="ex: 2.10" min="0" step="0.01"/></div>
         </div>
         {gly&&<div style={{padding:"8px 12px",background:glyColor(gly,cfg)+"11",border:"1px solid "+glyColor(gly,cfg),borderRadius:8,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:12,color:glyColor(gly,cfg),fontWeight:700}}>{glyLabel(gly,cfg)}</span>
@@ -1072,6 +1205,7 @@ export default function App(){
       <AnalysePanel dayData={ydayData} dayLabel={fmtDay(yday)} cfg={cfg} apiKey={apiKey}/>
       {MEALS.map(m=>{const onSave=data=>{const nm={...day.meals||{}};nm[m.id]=data;upDay({meals:nm});};const onDel=()=>{const ms={...day.meals||{}};delete ms[m.id];upDay({meals:ms});};return <MealBlock key={m.id} meal={m} saved={(day.meals&&day.meals[m.id])||null} onSave={onSave} onDelete={onDel} cfg={cfg} curve={day.dexcomCurve||null} apiKey={apiKey}/>;  })}
       <CorrectifBlock entries={day.correctifs||[]} onAdd={e=>upDay({correctifs:[...(day.correctifs||[]),e]})} onDelete={id=>upDay({correctifs:(day.correctifs||[]).filter(x=>x.id!==id)})} cfg={cfg}/>
+      <ActivityBlock entries={day.activites||[]} onAdd={e=>upDay({activites:[...(day.activites||[]),e]})} onDelete={id=>upDay({activites:(day.activites||[]).filter(x=>x.id!==id)})} cfg={cfg}/>
     </div>)}
 
     {tab==="report"&&(<div style={{padding:16,paddingBottom:40}}>
