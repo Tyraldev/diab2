@@ -404,17 +404,17 @@ async function libreLogin(username, password) {
   return d;
 }
 
-async function libreGetConnections(token) {
+async function libreGetConnections(token, accountId) {
   const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"libre_connections",token})});
+    body:JSON.stringify({action:"libre_connections",token,accountId:accountId||""})});
   const d = await r.json();
   if(d.error) throw new Error(d.error);
   return d.connections || [];
 }
 
-async function libreGetReadings(token, patientId, region) {
+async function libreGetReadings(token, patientId, region, accountId) {
   const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"libre_readings",token,patientId,region:region||""})});
+    body:JSON.stringify({action:"libre_readings",token,patientId,region:region||"",accountId:accountId||""})});
   const d = await r.json();
   if(d.error && d.code==="TOKEN_EXPIRED") throw new Error("TOKEN_EXPIRED");
   if(d.error) throw new Error(d.error);
@@ -453,7 +453,7 @@ function LibreLive({allData, saveAll, cfg}) {
 
   const doSync = async(c) => {
     try {
-      const data = await libreGetReadings(c.token, c.patientId, c.region);
+      const data = await libreGetReadings(c.token, c.patientId, c.region, c.accountId);
       const readings = data.readings || [];
       const current = data.current;
       const byDay = groupReadingsByDay(readings);
@@ -496,13 +496,13 @@ function LibreLive({allData, saveAll, cfg}) {
       // Get patient connections
       let pid = auth.patientId;
       if(!pid) {
-        const conns = await libreGetConnections(auth.token);
+        const conns = await libreGetConnections(auth.token, auth.accountId);
         if(conns.length > 0) pid = conns[0].id;
       }
 
       if(!pid) throw new Error("Aucun capteur trouve sur ce compte LibreView");
 
-      const c = {token: auth.token, patientId: pid, username, name: auth.name||username, region: auth.region||""};
+      const c = {token: auth.token, patientId: pid, username, name: auth.name||username, region: auth.region||"", accountId: auth.accountId||""};
 
       // Sync readings
       setStatus({type:"info", msg:"Recuperation des donnees..."});
