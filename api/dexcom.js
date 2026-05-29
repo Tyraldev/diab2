@@ -135,6 +135,11 @@ module.exports = async function handler(req, res) {
   const { action, code, accessToken, refreshToken } = body;
 
   try {
+    // Route LibreView actions
+    if (action && action.indexOf("libre_") === 0) {
+      return handleLibre(action, body, res);
+    }
+
     if (action === "exchange_code") {
       const r = await post("/v2/oauth2/token", {
         grant_type: "authorization_code",
