@@ -585,6 +585,7 @@ function LibreLive({allData, saveAll, cfg}) {
   const isConnected = !!(creds && creds.token && creds.patientId);
 
   const doSync = async(c) => {
+    if(!c || !c.token || !c.patientId) return;
     try {
       const data = await libreGetReadings(c.token, c.patientId, c.region, c.accountId);
       const readings = data.readings || [];
@@ -657,6 +658,7 @@ function LibreLive({allData, saveAll, cfg}) {
     if(intervalRef.current) clearInterval(intervalRef.current);
     const nd = {...allData};
     delete nd.libreCreds;
+    delete nd.liveGly;
     saveAll(nd);
     setStatus(null);
     setLastSync(null);
@@ -820,6 +822,7 @@ function DexcomLive({allData,saveAll,cfg}){
   const isConnected=!!(creds&&creds.accessToken);
 
   const doSync=async(tokens)=>{
+    if(!tokens || !tokens.accessToken) return;
     try{
       let tkns=tokens;
       if(tkns.expiresAt&&Date.now()>tkns.expiresAt-60000){
@@ -832,7 +835,9 @@ function DexcomLive({allData,saveAll,cfg}){
       const byDay=groupByDay(points);
       const newDays={...(allData.days||{})};
       Object.keys(byDay).forEach(dk=>{newDays[dk]={...(newDays[dk]||{}),dexcomCurve:byDay[dk]};});
-      saveAll({...allData,days:newDays,dexcomOAuth:tkns});
+      let liveGly=null;
+      if(points.length>0){const last=points[points.length-1];liveGly={value:last.value,trend:last.trend||"->",time:last.time,updatedAt:Date.now()};}
+      saveAll({...allData,days:newDays,dexcomOAuth:tkns,liveGly});
       setLastSync(new Date());
       setStatus({type:"ok",msg:points.length+" mesures synchronisees"+(points.length===0?" (verifiez debug dans console)":"")});
     }catch(e){
@@ -880,7 +885,7 @@ function DexcomLive({allData,saveAll,cfg}){
 
   const disconnect=()=>{
     if(intervalRef.current)clearInterval(intervalRef.current);
-    const nd={...allData};delete nd.dexcomOAuth;
+    const nd={...allData};delete nd.dexcomOAuth;delete nd.liveGly;
     saveAll(nd);setStatus(null);setLastSync(null);
   };
 
