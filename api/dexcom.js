@@ -1,4 +1,5 @@
 const https = require("https");
+const crypto = require("crypto");
 const qs = require("querystring");
 
 const CLIENT_ID = process.env.DEXCOM_CLIENT_ID;
@@ -42,7 +43,7 @@ function get(path, token) {
 // ── LIBREVIEW API ─────────────────────────────────────────────────────────────
 let LIBRE_HOST = "api-eu.libreview.io";
 
-function libreReq(method, path, body, token) {
+function libreReq(method, path, body, token, accountId) {
   return new Promise((resolve, reject) => {
     const data = body ? JSON.stringify(body) : null;
     const headers = {
@@ -56,6 +57,7 @@ function libreReq(method, path, body, token) {
       "Cache-Control": "no-cache",
     };
     if (token) headers["Authorization"] = "Bearer " + token;
+    if (accountId) headers["Account-Id"] = accountId;
     if (data) headers["Content-Length"] = Buffer.byteLength(data);
     const req = https.request({ hostname: LIBRE_HOST, path, method, headers }, res => {
       let raw = "";
@@ -88,9 +90,12 @@ async function handleLibre(action, body, res) {
     }
     if (r.status === 200 && r.data && r.data.data && r.data.data.authTicket) {
       const d = r.data.data;
+      const userId = d.user ? d.user.id : "";
+      const accountId = crypto.createHash("sha256").update(userId).digest("hex");
       return res.status(200).json({
         token: d.authTicket.token,
-        patientId: d.user ? d.user.id : "",
+        patientId: userId,
+        accountId: accountId,
         name: d.user ? (d.user.firstName + " " + d.user.lastName) : username,
         region: LIBRE_HOST
       });
@@ -100,7 +105,7 @@ async function handleLibre(action, body, res) {
 
   if (action === "libre_connections") {
     if (body.region) LIBRE_HOST = body.region;
-    const r = await libreReq("GET", "/llu/connections", null, token);
+    const r = await libreReq("GET", "/llu/connections", null, token, body.accountId);
     if (r.status !== 200) return res.status(r.status).json({ error: "Connections: "+JSON.stringify(r.data).slice(0,200) });
     const conns = r.data.data || [];
     return res.status(200).json({ connections: conns.map(c => ({ id: c.patientId, name: c.firstName+" "+c.lastName })) });
@@ -110,7 +115,7 @@ async function handleLibre(action, body, res) {
     if (body.region) LIBRE_HOST = body.region;
     if (!token) return res.status(400).json({error:"No token provided", hasToken:!!token, bodyKeys:Object.keys(body)});
     if (!patientId) return res.status(400).json({error:"No patientId provided"});
-    const r = await libreReq("GET", "/llu/connections/"+patientId+"/graph", null, token);
+    const r = await libreReq("GET", "/llu/connections/"+patientId+"/graph", null, token, body.accountId);
     if (r.status === 401) return res.status(401).json({ error: "TOKEN_EXPIRED", code: "TOKEN_EXPIRED" });
     if (r.status !== 200) return res.status(r.status).json({ error: "Readings: "+JSON.stringify(r.data).slice(0,200) });
     const data = r.data.data || {};
