@@ -429,6 +429,14 @@ async function libreGetHistory(token, patientId) {
   return d.readings || [];
 }
 
+async function libreGetHistory(token, patientId, region, accountId) {
+  const r = await fetch("/api/dexcom", {method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"libre_history",token,patientId,region:region||"",accountId:accountId||""})});
+  const d = await r.json();
+  if(d.error) throw new Error(d.error);
+  return d;
+}
+
 function groupReadingsByDay(readings) {
   const byDay = {};
   readings.forEach(p => {
@@ -568,6 +576,7 @@ function LibreLive({allData, saveAll, cfg}) {
           {lastSync&&<div style={{fontSize:11,color:C.muted,marginBottom:10}}>{"Derniere synchro: "+lastSync.toLocaleString("fr-FR")}</div>}
           <div style={{display:"flex",gap:8}}>
             <PBtn onClick={()=>doSync(creds)} color={C.green} full>Synchroniser maintenant</PBtn>
+            <button onClick={async()=>{setStatus({type:"info",msg:"Recuperation historique..."});try{const h=await libreGetHistory(creds.token,creds.patientId,creds.region,creds.accountId);const byDay=groupReadingsByDay(h.readings||[]);const newDays={...(allData.days||{})};Object.keys(byDay).forEach(dk=>{newDays[dk]={...(newDays[dk]||{}),dexcomCurve:byDay[dk]};});saveAll({...allData,days:newDays});setStatus({type:"ok",msg:(h.count||0)+" mesures historiques importees"});}catch(e){setStatus({type:"error",msg:"Erreur: "+e.message});}}} style={{padding:"8px 16px",background:"#7e22ce",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Historique</button>
             <OBtn onClick={disconnect} color={C.red} small>Deconnecter</OBtn>
           </div>
         </div>)}
@@ -782,6 +791,7 @@ function DexcomLive({allData,saveAll,cfg}){
         {lastSync&&<div style={{fontSize:11,color:C.muted,marginBottom:10}}>{"Derniere synchro: "+lastSync.toLocaleString("fr-FR")}</div>}
         <div style={{display:"flex",gap:8}}>
           <PBtn onClick={()=>doSync(creds)} color={C.green} full>Synchroniser maintenant</PBtn>
+            <button onClick={async()=>{setStatus({type:"info",msg:"Recuperation historique..."});try{const h=await libreGetHistory(creds.token,creds.patientId,creds.region,creds.accountId);const byDay=groupReadingsByDay(h.readings||[]);const newDays={...(allData.days||{})};Object.keys(byDay).forEach(dk=>{newDays[dk]={...(newDays[dk]||{}),dexcomCurve:byDay[dk]};});saveAll({...allData,days:newDays});setStatus({type:"ok",msg:(h.count||0)+" mesures historiques importees"});}catch(e){setStatus({type:"error",msg:"Erreur: "+e.message});}}} style={{padding:"8px 16px",background:"#7e22ce",color:"white",border:"none",borderRadius:8,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>Historique</button>
           <OBtn onClick={disconnect} color={C.red} small>Deconnecter</OBtn>
         </div>
       </div>)}
