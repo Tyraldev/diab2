@@ -103,6 +103,17 @@ async function handleLibre(action, body, res) {
     return res.status(401).json({ error: "Identifiants LibreView incorrects: " + JSON.stringify(r.data).slice(0,300) });
   }
 
+  if (action === "libre_debug") {
+    if (body.region) LIBRE_HOST = body.region;
+    const conns = await libreReq("GET", "/llu/connections", null, token, body.accountId);
+    return res.status(200).json({
+      host: LIBRE_HOST,
+      connectionsStatus: conns.status,
+      connectionsData: conns.data,
+      connectionCount: (conns.data && conns.data.data) ? conns.data.data.length : 0
+    });
+  }
+
   if (action === "libre_connections") {
     if (body.region) LIBRE_HOST = body.region;
     const r = await libreReq("GET", "/llu/connections", null, token, body.accountId);
