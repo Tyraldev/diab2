@@ -35,17 +35,22 @@ async function checkForUpdate() {
 }
 
 async function forceUpdate() {
+  // 1. Vider les caches d abord (pour que le prochain chargement prenne le neuf)
   try {
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations()
-      await Promise.all(regs.map(r => r.unregister()))
-    }
     if ('caches' in window) {
       const keys = await caches.keys()
       await Promise.all(keys.map(k => caches.delete(k)))
     }
   } catch (_) { /* ignore */ }
-  location.reload()
+  // 2. Demander au SW en attente de prendre la main, puis desinscrire
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(regs.map(r => r.unregister()))
+    }
+  } catch (_) { /* ignore */ }
+  // 3. Recharger vers la racine (chargement frais depuis le reseau)
+  window.location.href = '/?u=' + Date.now()
 }
 
 function showUpdateBanner() {
