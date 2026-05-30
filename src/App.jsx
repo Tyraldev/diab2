@@ -1415,10 +1415,10 @@ function AnalysePanel({dayData,dayLabel,cfg,apiKey,allData,refDayIso}) {
   const [result,setResult]=useState(null);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState(null);
-  const hasSituation=(situation&&situation.enough)||(allData&&allData.liveGly);
-  const hasData=(dayData.meals&&Object.keys(dayData.meals).length>0)||(dayData.dexcomCurve&&dayData.dexcomCurve.length>0)||(dayData.correctifs&&dayData.correctifs.length>0)||hasSituation;
   const ratios3j=allData ? analyseRatios3Jours(allData,cfg,refDayIso||TODAY()) : null;
   const situation=allData ? situationActuelle(allData,cfg,refDayIso||TODAY()) : null;
+  const hasSituation=(situation&&situation.enough)||(allData&&allData.liveGly);
+  const hasData=(dayData.meals&&Object.keys(dayData.meals).length>0)||(dayData.dexcomCurve&&dayData.dexcomCurve.length>0)||(dayData.correctifs&&dayData.correctifs.length>0)||hasSituation;
   const run=()=>{setErr(null);setResult({...analyseLocal(dayData,cfg),_ratios3j:ratios3j,_situation:situation});};
   const enhance=async()=>{setLoading(true);setErr(null);try{const r=await aiAnalyse({...dayData,label:dayLabel},cfg,apiKey,ratios3j,situation);setResult({...r,_ai:true,_ratios3j:ratios3j,_situation:situation});}catch(e){setErr("IA indisponible ("+e.message+")");}finally{setLoading(false);};};
   const sc=s=>s>=8 ? C.green : s>=5 ? C.orange : C.red;
