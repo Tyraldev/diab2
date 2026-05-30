@@ -3,24 +3,35 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import { registerSW } from 'virtual:pwa-register'
 
-// __BUILD_ID__ est injecte au build (voir vite.config.js)
-const CURRENT_BUILD = typeof __BUILD_ID__ !== 'undefined' ? __BUILD_ID__ : 'dev'
 const CHECK_INTERVAL_MS = 60 * 1000
 
-// Enregistre le SW pour le mode hors-ligne (sans gestion de prompt - on gere nous-memes)
+// Enregistre le SW pour le mode hors-ligne
 registerSW({ immediate: true })
 
+let knownBuildId = null   // le buildId au moment ou l app a ete chargee
 let bannerShown = false
+
+async function fetchBuildId() {
+  const res = await fetch('/version.json?t=' + Date.now(), { cache: 'no-store' })
+  if (!res.ok) throw new Error('version.json status ' + res.status)
+  const data = await res.json()
+  return data && data.buildId ? String(data.buildId) : null
+}
 
 async function checkForUpdate() {
   try {
-    const res = await fetch('/version.json?t=' + Date.now(), { cache: 'no-store' })
-    if (!res.ok) return
-    const data = await res.json()
-    if (data && data.buildId && data.buildId !== CURRENT_BUILD) {
+    const serverBuild = await fetchBuildId()
+    if (!serverBuild) return
+    // Premiere lecture: on memorise le build courant (celui qui tourne)
+    if (knownBuildId === null) {
+      knownBuildId = serverBuild
+      return
+    }
+    // Si le serveur a un build different de celui charge au demarrage -> nouvelle version
+    if (serverBuild !== knownBuildId) {
       showUpdateBanner()
     }
-  } catch (_) { /* hors-ligne ou erreur reseau: on ignore */ }
+  } catch (_) { /* hors-ligne / erreur: on ignore */ }
 }
 
 async function forceUpdate() {
@@ -34,8 +45,7 @@ async function forceUpdate() {
       await Promise.all(keys.map(k => caches.delete(k)))
     }
   } catch (_) { /* ignore */ }
-  // Recharge en contournant le cache
-  location.reload(true)
+  location.reload()
 }
 
 function showUpdateBanner() {
@@ -55,7 +65,7 @@ function showUpdateBanner() {
   document.body.appendChild(bar)
 }
 
-// Verifier au demarrage, periodiquement, et quand l app reprend le focus
+// Lecture initiale (memorise le build courant), puis verification periodique
 checkForUpdate()
 setInterval(checkForUpdate, CHECK_INTERVAL_MS)
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate() })
