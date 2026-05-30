@@ -355,7 +355,7 @@ function DayCurve({pts,meals,cfg,width,height,winStart,winEnd}){
   const wStart = winStart!==undefined ? winStart : Math.min(...allTs);
   const wEnd = winEnd!==undefined ? winEnd : Math.max(...allTs);
   // Filtrer les points dans la fenetre
-  const inWin=pts.map((p,i)=>({p,ts:allTs[i],v:parseFloat(p.value)})).filter(x=>x.ts>=wStart&&x.ts<=wEnd);
+  const inWin=pts.map((p,i)=>({p,ts:allTs[i],v:parseFloat(p.value)})).filter(x=>x.ts>=wStart&&x.ts<=wEnd&&!isNaN(x.v)&&!isNaN(x.ts)).sort((a,b)=>a.ts-b.ts);
   if(inWin.length<1)return(<div style={{padding:"20px",textAlign:"center",fontSize:12,color:C.muted}}>Aucune donnee sur cette periode</div>);
   const vals=inWin.map(x=>x.v);
   const minV=0.4,maxV=Math.max(3.2,Math.max(...vals)+0.3);
@@ -484,6 +484,13 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey,sportProfil}) {
           <div><Lbl>{glyAuto ? "Valeur manuelle (override)" : "Valeur (g/L)"}</Lbl><TInput type="number" value={glyMan} onChange={setGlyMan} onBlur={()=>setGlyMan(normalizeGly(glyMan))} placeholder={glyAuto ? glyAuto.value : "ex: 1.40"} min="0" step="0.01"/></div>
           <div>{glyEff&&<div style={{padding:"9px 12px",background:glyColor(glyEff.toFixed(2),cfg)+"22",border:"1.5px solid "+glyColor(glyEff.toFixed(2),cfg),borderRadius:8,textAlign:"center"}}><div style={{fontSize:10,color:C.muted}}>{glyMan ? "Manuelle" : "Dexcom"}</div><div style={{fontWeight:800,color:glyColor(glyEff.toFixed(2),cfg),fontSize:14}}>{glyEff.toFixed(2)+" g/L"}</div></div>}</div>
         </div>
+        <div style={{marginTop:10}}><Lbl>Bolus de correction injecte (UI)</Lbl><TInput type="number" value={bolus} onChange={setBolus} placeholder="0" min="0" step="0.5"/></div>
+      </div>
+      <div style={{marginBottom:10}}>
+        <Lbl>Photo du repas</Lbl>
+        {photo ? <div><img src={photo} alt="" style={{maxHeight:160,maxWidth:"100%",borderRadius:8,border:"1px solid "+C.border,display:"block",cursor:"pointer"}} onClick={()=>ref.current.click()}/><button onClick={()=>setPhoto(null)} style={{fontSize:11,color:C.muted,background:"none",border:"none",cursor:"pointer",marginTop:4}}>Supprimer</button></div>
+          : <div onClick={()=>ref.current.click()} style={{border:"2px dashed "+C.border,borderRadius:10,padding:"12px",cursor:"pointer",textAlign:"center",background:"#fafaf8",fontSize:13,color:C.muted}}>Ajouter une photo</div>}
+        <input ref={ref} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{if(e.target.files[0])setPhoto(await compressImg(e.target.files[0],800));}}/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 50px",gap:10,alignItems:"end",marginBottom:4}}>
         <div><Lbl>Glucides (g)</Lbl><TInput type="number" value={glucides} onChange={setGlucides} placeholder="0" min="0"/></div>
@@ -511,17 +518,11 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey,sportProfil}) {
         </div>
         <button onClick={()=>{setInsulR(s.br);setBolus(s.bc);}} style={{width:"100%",padding:"6px",background:C.red,color:"white",border:"none",borderRadius:6,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Utiliser cette dose</button>
       </div>)}
-      <div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:6}}>
-        <div><Lbl>Bolus repas (UI)</Lbl><TInput type="number" value={insulR} onChange={setInsulR} placeholder="0" min="0" step="0.5"/></div>
-        <div><Lbl>Bolus correction (UI)</Lbl><TInput type="number" value={bolus} onChange={setBolus} placeholder="0" min="0" step="0.5"/></div>
+      <div style={{marginTop:10,marginBottom:6}}>
+        <div><Lbl>Bolus repas reellement injecte (UI)</Lbl><TInput type="number" value={insulR} onChange={setInsulR} placeholder="0" min="0" step="0.5"/></div>
       </div>
       {totB>0&&<div style={{background:"#fee2e2",borderRadius:8,padding:"6px 10px",fontSize:13,color:C.red,fontWeight:700,marginBottom:10}}>{"Total injecte: "+totB.toFixed(1)+" UI"}</div>}
-      <div style={{marginTop:10}}>
-        <Lbl>Photo du repas</Lbl>
-        {photo ? <div><img src={photo} alt="" style={{maxHeight:130,maxWidth:"100%",borderRadius:8,border:"1px solid "+C.border,display:"block",cursor:"pointer"}} onClick={()=>ref.current.click()}/><button onClick={()=>setPhoto(null)} style={{fontSize:11,color:C.muted,background:"none",border:"none",cursor:"pointer",marginTop:4}}>Supprimer</button></div>
-          : <div onClick={()=>ref.current.click()} style={{border:"2px dashed "+C.border,borderRadius:10,padding:"12px",cursor:"pointer",textAlign:"center",background:"#fafaf8",fontSize:13,color:C.muted}}>Ajouter une photo</div>}
-        <input ref={ref} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{if(e.target.files[0])setPhoto(await f2b64(e.target.files[0]));}}/>
-      </div>
+
       <div style={{display:"flex",gap:8,marginTop:12}}>
         <PBtn onClick={save} color={meal.color} full>Enregistrer</PBtn>
         {saved&&<OBtn onClick={()=>{onDelete();setOpen(false);}} color={C.red} small>Sup.</OBtn>}
@@ -693,9 +694,17 @@ async function libreGetHistory(token, patientId, region, accountId) {
 function groupReadingsByDay(readings) {
   const byDay = {};
   readings.forEach(p => {
+    if(!p.ts) return;
     const dk = p.ts.slice(0,10);
     if(!byDay[dk]) byDay[dk] = [];
     byDay[dk].push(p);
+  });
+  // Trier chaque jour par timestamp et dedupliquer
+  Object.keys(byDay).forEach(dk=>{
+    const seen={};
+    byDay[dk] = byDay[dk]
+      .filter(p=>{if(seen[p.ts])return false;seen[p.ts]=1;return true;})
+      .sort((a,b)=>a.ts.localeCompare(b.ts));
   });
   return byDay;
 }
@@ -727,14 +736,17 @@ function LibreLive({allData, saveAll, cfg}) {
       let liveGly = current;
       if(current && current.value) {
         const todayKey = TODAY();
-        const curve = newDays[todayKey] && newDays[todayKey].dexcomCurve ? [...newDays[todayKey].dexcomCurve] : [];
-        // Ajouter current s il est plus recent que le dernier point
-        const lastPt = curve.length>0 ? curve[curve.length-1] : null;
-        if(!lastPt || current.value!==lastPt.value || current.time!==lastPt.time) {
-          const now = new Date();
-          curve.push({time:current.time||now.toTimeString().slice(0,5), value:current.value, ts:now.toISOString(), trend:current.trend||"->"});
-          newDays[todayKey] = {...(newDays[todayKey]||{}), dexcomCurve:curve};
+        let curve = newDays[todayKey] && newDays[todayKey].dexcomCurve ? [...newDays[todayKey].dexcomCurve] : [];
+        // current.ts si fourni par l API, sinon maintenant
+        const curTs = current.ts || new Date().toISOString();
+        // Eviter doublon: ne pas ajouter si un point existe deja a cette heure
+        const exists = curve.some(p=>p.ts===curTs || (p.time===current.time && p.value===current.value));
+        if(!exists) {
+          curve.push({time:current.time||new Date(curTs).toTimeString().slice(0,5), value:current.value, ts:curTs, trend:current.trend||"->"});
         }
+        // Re-trier pour garantir l ordre chronologique
+        curve.sort((a,b)=>a.ts.localeCompare(b.ts));
+        newDays[todayKey] = {...(newDays[todayKey]||{}), dexcomCurve:curve};
       }
       if(!liveGly && readings.length>0) {
         const last = readings[readings.length-1];
@@ -1403,7 +1415,8 @@ function AnalysePanel({dayData,dayLabel,cfg,apiKey,allData,refDayIso}) {
   const [result,setResult]=useState(null);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState(null);
-  const hasData=(dayData.meals&&Object.keys(dayData.meals).length>0)||(dayData.dexcomCurve&&dayData.dexcomCurve.length>0)||(dayData.correctifs&&dayData.correctifs.length>0);
+  const hasSituation=(situation&&situation.enough)||(allData&&allData.liveGly);
+  const hasData=(dayData.meals&&Object.keys(dayData.meals).length>0)||(dayData.dexcomCurve&&dayData.dexcomCurve.length>0)||(dayData.correctifs&&dayData.correctifs.length>0)||hasSituation;
   const ratios3j=allData ? analyseRatios3Jours(allData,cfg,refDayIso||TODAY()) : null;
   const situation=allData ? situationActuelle(allData,cfg,refDayIso||TODAY()) : null;
   const run=()=>{setErr(null);setResult({...analyseLocal(dayData,cfg),_ratios3j:ratios3j,_situation:situation});};
@@ -1413,14 +1426,14 @@ function AnalysePanel({dayData,dayLabel,cfg,apiKey,allData,refDayIso}) {
     <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         <span style={{background:C.purple,color:"white",borderRadius:8,padding:"4px 10px",fontSize:12,fontWeight:700}}>IA</span>
-        <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Analyse de la veille</div>
-          <div style={{fontSize:12,color:C.muted}}>{result ? "Score: "+result.score_equilibre+"/10" : dayLabel}</div>
+        <div><div style={{fontWeight:700,color:C.text,fontSize:15}}>Analyse IA</div>
+          <div style={{fontSize:12,color:C.muted}}>{result ? "Score: "+result.score_equilibre+"/10" : "Conseils + situation actuelle"}</div>
         </div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>{result&&<span style={{fontWeight:800,fontSize:16,color:sc(result.score_equilibre)}}>{result.score_equilibre+"/10"}</span>}<span style={{color:C.muted}}>{open ? "^" : "v"}</span></div>
     </div>
     {open&&(<div style={{padding:"4px 16px 16px",borderTop:"1px solid #ede9fe"}}>
-      {!result&&<div style={{marginBottom:12}}><p style={{fontSize:13,color:C.text,marginBottom:10}}>{"Analyse du "+dayLabel}</p><PBtn onClick={run} disabled={!hasData} color={C.purple} full>Lancer l analyse</PBtn></div>}
+      {!result&&<div style={{marginBottom:12}}><p style={{fontSize:13,color:C.text,marginBottom:10}}>Analyse de la journee passee + point sur ta situation actuelle.</p><PBtn onClick={run} disabled={!hasData} color={C.purple} full>Lancer l analyse</PBtn></div>}
       {err&&<div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 10px",marginBottom:8,fontSize:12,color:"#92400e"}}>{err}</div>}
       {result&&(<div>
         <div style={{background:"white",borderRadius:10,padding:14,marginBottom:10,border:"1px solid "+C.border}}>
