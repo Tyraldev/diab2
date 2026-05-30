@@ -2,9 +2,22 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Identifiant unique genere a chaque build - sert a detecter les nouvelles versions
+const BUILD_ID = Date.now().toString()
+
 export default defineConfig({
+  define: {
+    __BUILD_ID__: JSON.stringify(BUILD_ID)
+  },
   plugins: [
     react(),
+    {
+      // Emet un fichier version.json (non cache) contenant l identifiant du build
+      name: 'emit-version-json',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'version.json', source: JSON.stringify({ buildId: BUILD_ID }) })
+      }
+    },
     VitePWA({
       registerType: 'prompt',
       injectRegister: null,
@@ -30,7 +43,12 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         // Ne pas intercepter les routes API
         navigateFallbackDenylist: [/^\/api\/.*/],
+        globIgnores: ['version.json'],
         runtimeCaching: [
+          {
+            urlPattern: /version\.json/,
+            handler: 'NetworkOnly'
+          },
           {
             urlPattern: /^\/api\/.*/,
             handler: 'NetworkOnly'
