@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 
 const SK = "diabete-v5";
-const VERSION = "v2.8";
+const VERSION = "v2.9";
 const DEF = { tMin:0.9, tMax:1.8, ratioIC:10, fc:0.5, ciblePre:1.2, lenteHab:"", lenteHeure:"22:00", lenteNom:"" };
 const MEALS = [
   { id:"breakfast", label:"Petit-dejeuner", tag:"Matin",  color:"#d97706" },
