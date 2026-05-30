@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 
 const SK = "diabete-v5";
-const VERSION = "v2.4";
+const VERSION = "v2.5";
 const DEF = { tMin:0.9, tMax:1.8, ratioIC:10, fc:0.5, ciblePre:1.2, lenteHab:"", lenteHeure:"22:00", lenteNom:"" };
 const MEALS = [
   { id:"breakfast", label:"Petit-dejeuner", tag:"Matin",  color:"#d97706" },
@@ -76,16 +76,38 @@ function getClosestGly(curve,timeStr){if(!curve||!curve.length)return null;const
 
 function parseJSON(txt){
   if(!txt)return {};
+  let s=txt.trim();
+  const fence=String.fromCharCode(96,96,96);
+  if(s.startsWith(fence)){const nl=s.indexOf("\n");if(nl>-1)s=s.slice(nl+1);}
+  if(s.endsWith(fence)){const nl=s.lastIndexOf("\n");if(nl>-1)s=s.slice(0,nl);}
+  s=s.trim();
+  const a=s.indexOf("{");
+  if(a===-1)return {resume:"Erreur. Relancez.",score_equilibre:5,recommandations:[]};
+  // Essai 1: parsing direct du dernier } 
+  try{const b=s.lastIndexOf("}");if(b>a)return JSON.parse(s.slice(a,b+1));}catch(_){}
+  // Essai 2: reparer un JSON tronque en fermant les accolades/crochets ouverts
   try{
-    let s=txt.trim();
-    const fence=String.fromCharCode(96,96,96);
-    if(s.startsWith(fence)){const nl=s.indexOf("\n");if(nl>-1)s=s.slice(nl+1);}
-    if(s.endsWith(fence)){const nl=s.lastIndexOf("\n");if(nl>-1)s=s.slice(0,nl);}
-    s=s.trim();
-    const a=s.indexOf("{"),b=s.lastIndexOf("}");
-    if(a===-1||b===-1)return {};
-    return JSON.parse(s.slice(a,b+1));
-  }catch(_){return {resume:"Erreur. Relancez.",score_equilibre:5,observations:[],recommandations:[],conseils_dosage:[]};}}
+    let str=s.slice(a);
+    let depth=0,inStr=false,esc=false,lastValid=-1;
+    for(let i=0;i<str.length;i++){
+      const ch=str[i];
+      if(esc){esc=false;continue;}
+      if(ch==="\\"){esc=true;continue;}
+      if(ch==='"')inStr=!inStr;
+      if(!inStr){if(ch==="{"||ch==="[")depth++;else if(ch==="}"||ch==="]"){depth--;if(depth===0)lastValid=i;}}
+    }
+    if(lastValid>0)return JSON.parse(str.slice(0,lastValid+1));
+    // Tronque en plein milieu: fermer ce qui est ouvert
+    let repaired=str;if(inStr)repaired+='"';
+    // Construire la fermeture en respectant le type (array ou object) via une pile
+    let stack=[],inStr2=false,esc2=false;
+    for(let i=0;i<repaired.length;i++){const ch=repaired[i];if(esc2){esc2=false;continue;}if(ch==="\\"){esc2=true;continue;}if(ch==='"')inStr2=!inStr2;if(!inStr2){if(ch==="{")stack.push("}");else if(ch==="[")stack.push("]");else if(ch==="}"||ch==="]")stack.pop();}}
+    // Retirer une virgule tra nante eventuelle
+    repaired=repaired.replace(/,\s*$/,"");
+    while(stack.length){repaired+=stack.pop();}
+    return JSON.parse(repaired);
+  }catch(_){return {resume:"Reponse trop longue ou incomplete. Relancez l analyse.",score_equilibre:null,recommandations:[]};}
+}
 
 async function aiGlucides(desc,apiKey){
   const prompt="Tu es un dieteticien expert. Estime les glucides: "+desc+". JSON: {total:number,confidence:string,items:[{name:string,glucides:number}],conseil:string}";
@@ -178,7 +200,7 @@ async function aiAnalyse(dayCtx,cfg,apiKey,ratios3j,situation){
   const instr="\n=== MISSION ===\nTu es un diabetologue expert qui accompagne ce patient diabetique de type 1. La journee analysee peut etre EN COURS (incomplete) - c est normal, analyse ce qui est disponible sans exiger une journee complete.\n\nObjectifs par ordre de priorite:\n1. SITUATION ACTUELLE: commente la glycemie live. Si elle est trop haute, propose clairement le bolus de correction calcule (rappelle le chiffre). Si trop basse, conseille le resucrage. Indique quoi surveiller dans les prochaines heures.\n2. ANALYSE DES REPAS DEJA PRIS: pour chaque repas, compare dose injectee vs ideale. Si la glycemie post-prandiale (sur la courbe ~2h apres) est trop haute, explique que le repas etait soit plus sucre que prevu (glucides sous-estimes), soit l insuline insuffisante. Sois concret.\n3. Utilise les calculs backend (ratios 3j, TIR, schemas) comme base FACTUELLE - commente, ne recalcule pas.\n\nReponds en JSON brut valide: {resume (2-3 phrases sur la journee en cours ou passee),score_equilibre (0-10 ou null si journee trop incomplete),analyse_doses:[{repas,dose_injectee,dose_ideale,ecart,explication}],adaptation_ratios:{ratioIC_actuel,ratioIC_suggere,fc_actuel,fc_suggere,explication},analyse_nocturne:{bilan,suggestion_lente,risque_hypo_nuit},situation_actuelle:{bilan_global,point_immediat (action concrete MAINTENANT, avec le bolus de correction chiffre si gly haute),tendance_a_surveiller},recommandations:[string]}\n\nIMPORTANT: tes suggestions de doses/correction sont indicatives, le patient valide avec son jugement et son medecin. Ne propose jamais de changement brutal de ratio.";
   let res;
   try{res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getHDRS(apiKey),
-    body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1000,messages:[{role:"user",content:lines.join("\n")+instr}]})});}
+    body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:2500,messages:[{role:"user",content:lines.join("\n")+instr}]})});}
   catch(e){throw new Error("Connexion impossible: "+e.message);}
   if(!res.ok){let m2="";try{const ed2=await res.json();m2=(ed2.error&&ed2.error.message)||"";}catch(_){}throw new Error("Erreur API "+res.status+(m2?" - "+m2:""));}
   let d2;try{d2=await res.json();}catch(e){throw new Error("Reponse illisible");}
