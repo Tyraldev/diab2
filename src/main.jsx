@@ -3,19 +3,35 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import { registerSW } from 'virtual:pwa-register'
 
-// Auto-update du service worker avec notification de rechargement
+const CHECK_INTERVAL_MS = 60 * 1000 // verifier les MAJ toutes les 60s
+
 const updateSW = registerSW({
   onNeedRefresh() {
-    // Une nouvelle version est dispo : afficher un bandeau
     showUpdateBanner(() => updateSW(true))
   },
   onOfflineReady() {
     console.log('App prete pour le mode hors-ligne')
   },
+  onRegisteredSW(swUrl, registration) {
+    if (!registration) return
+    // 1. Verification periodique des mises a jour
+    setInterval(() => {
+      registration.update().catch(() => {})
+    }, CHECK_INTERVAL_MS)
+    // 2. Verifier quand l utilisateur revient sur l app
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        registration.update().catch(() => {})
+      }
+    })
+    // 3. Verifier au focus de la fenetre
+    window.addEventListener('focus', () => {
+      registration.update().catch(() => {})
+    })
+  },
 })
 
 function showUpdateBanner(onReload) {
-  // Eviter les doublons
   if (document.getElementById('sw-update-banner')) return
   const bar = document.createElement('div')
   bar.id = 'sw-update-banner'
