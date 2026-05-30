@@ -6,9 +6,6 @@ import { VitePWA } from 'vite-plugin-pwa'
 const BUILD_ID = Date.now().toString()
 
 export default defineConfig({
-  define: {
-    __BUILD_ID__: JSON.stringify(BUILD_ID)
-  },
   plugins: [
     react(),
     {
