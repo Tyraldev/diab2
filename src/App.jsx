@@ -125,7 +125,7 @@ async function aiGlucidesPhoto(photoB64, desc, apiKey){
   return r;
 }
 
-async function aiAnalyse(dayCtx,cfg,apiKey){
+async function aiAnalyse(dayCtx,cfg,apiKey,ratios3j,situation){
   const lines=["Parametres: cible "+cfg.tMin+"-"+cfg.tMax+" g/L, ratio IC: 1UI/"+cfg.ratioIC+"g, FC: "+cfg.fc+" g/L/UI"];
   lines.push("Insuline lente: "+(cfg.lenteHab||"non renseignee")+" UI a "+(cfg.lenteHeure||"?"));
   lines.push("Journee: "+dayCtx.label);
@@ -151,7 +151,26 @@ async function aiAnalyse(dayCtx,cfg,apiKey){
     const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);
     lines.push("Dexcom: moy="+avg+" g/L tir="+tir+"%");
   }
-  const instr="\n=== MISSION ===\nDiabetologue expert. JSON brut valide: {resume,score_equilibre,analyse_doses:[{repas,dose_injectee,dose_ideale,ecart,explication}],adaptation_ratios:{ratioIC_actuel,ratioIC_suggere,fc_actuel,fc_suggere,explication},analyse_nocturne:{bilan,suggestion_lente,risque_hypo_nuit},recommandations:[string]}";
+  // === DONNEES BACKEND (calculs deterministes) ===
+  if(ratios3j&&ratios3j.enough){
+    lines.push("=== ANALYSE RATIOS SUR 3 JOURS (calcul backend, "+ratios3j.sampleCount+" repas analyses, sport exclu) ===");
+    lines.push("Glycemie post-prandiale moyenne (+2h): "+ratios3j.avgPost+" g/L (cible "+ratios3j.ciblePost+")");
+    lines.push("Tendance: "+ratios3j.tendance);
+    if(ratios3j.icSuggere)lines.push("Ratio IC actuel: 1/"+ratios3j.icActuel+" -> suggere par les donnees: 1/"+ratios3j.icSuggere+" (variation "+(ratios3j.icChange>0?"+":"")+ratios3j.icChange+")");
+    if(ratios3j.fcSuggere)lines.push("FC actuel: "+ratios3j.fcActuel+" -> suggere: "+ratios3j.fcSuggere+" (variation "+(ratios3j.fcChange>0?"+":"")+ratios3j.fcChange+")");
+  } else if(ratios3j){
+    lines.push("=== RATIOS 3J: donnees insuffisantes ("+(ratios3j.sampleCount||0)+" repas exploitables, il en faut au moins 2 sans sport) ===");
+  }
+  if(situation&&situation.enough){
+    lines.push("=== SITUATION ACTUELLE DU PATIENT (7 jours, "+situation.nbMesures+" mesures) ===");
+    lines.push("Glycemie moyenne: "+situation.moyenne+" g/L | Variabilite (CV): "+situation.cv+"% | TIR: "+situation.tir+"% | Temps <cible: "+situation.tBelow+"% | Temps >cible: "+situation.tAbove+"%");
+    if(situation.schemas&&situation.schemas.length>0){lines.push("Schemas detectes:");situation.schemas.forEach(s=>lines.push("- "+s));}
+    if(situation.live&&situation.live.value){
+      const ageMin=situation.live.updatedAt?Math.round((Date.now()-situation.live.updatedAt)/60000):null;
+      lines.push("GLYCEMIE LIVE MAINTENANT: "+situation.live.value+" g/L "+(situation.live.trend||"")+(ageMin!==null?" (il y a "+ageMin+" min)":""));
+    }
+  }
+  const instr="\n=== MISSION ===\nTu es un diabetologue expert qui accompagne ce patient diabetique de type 1. Analyse la journee de la veille ET fais un point clair sur sa situation actuelle.\n\nUtilise les calculs backend fournis (ratios 3 jours, TIR, schemas) comme base FACTUELLE - ne recalcule pas, commente et explique.\n\nPriorite: aider le patient sur sa SITUATION ACTUELLE (glycemie live + tendance + ce qu il doit surveiller maintenant ou dans les prochaines heures).\n\nReponds en JSON brut valide: {resume (2-3 phrases sur la veille),score_equilibre (0-10),analyse_doses:[{repas,dose_injectee,dose_ideale,ecart,explication}],adaptation_ratios:{ratioIC_actuel,ratioIC_suggere,fc_actuel,fc_suggere,explication (base sur les calculs 3 jours)},analyse_nocturne:{bilan,suggestion_lente,risque_hypo_nuit},situation_actuelle:{bilan_global (TIR, variabilite, equilibre 7j),point_immediat (que faire maintenant vu la gly live et les schemas),tendance_a_surveiller},recommandations:[string]}\n\nIMPORTANT: tes suggestions de ratios/doses sont indicatives et le patient doit valider avec son medecin. Ne propose jamais de changement brutal.";
   let res;
   try{res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getHDRS(apiKey),
     body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1000,messages:[{role:"user",content:lines.join("\n")+instr}]})});}
@@ -419,7 +438,7 @@ function GlucidesAI({initDesc,onAccept,apiKey,photo:mealPhoto}){
   </div>);
 }
 
-function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}) {
+function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey,sportProfil}) {
   const [open,setOpen]=useState(false);
   const [time,setTime]=useState((saved&&saved.time)||nowTime());
   const [desc,setDesc]=useState((saved&&saved.desc)||"");
@@ -429,12 +448,19 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}) {
   const [bolus,setBolus]=useState((saved&&saved.bolusCorrection)||"");
   const [photo,setPhoto]=useState((saved&&saved.photo)||null);
   const [showAI,setShowAI]=useState(false);
+  const [sportPrevu,setSportPrevu]=useState((saved&&saved.sportPrevu)||false);
+  const [sportIntensite,setSportIntensite]=useState((saved&&saved.sportIntensite)||"modere");
   const ref=useRef();
   const glyAuto=curve ? getClosestGly(curve,time) : null;
   const glyEff=glyMan ? parseFloat(glyMan) : (glyAuto ? parseFloat(glyAuto.value) : null);
-  const s=(cfg&&(glucides||glyEff)) ? (()=>{const g=parseFloat(glucides)||0;const br=g>0 ? g/cfg.ratioIC : 0;const bc=glyEff&&glyEff>cfg.ciblePre ? (glyEff-cfg.ciblePre)/cfg.fc : 0;return{br:br.toFixed(1),bc:bc.toFixed(1),total:(br+bc).toFixed(1)};})() : null;
+  // Reduction si sport prevu dans les 2h - personnalisee via l historique si dispo
+  const sportDefaut={leger:0.20,modere:0.33,intense:0.50};
+  const profilInt=sportProfil&&sportProfil[sportIntensite];
+  const reducFactor=sportPrevu ? (profilInt ? profilInt.reduc : (sportDefaut[sportIntensite]||0)) : 0;
+  const reducPersonnalisee=profilInt&&profilInt.personalized;
+  const s=(cfg&&(glucides||glyEff)) ? (()=>{const g=parseFloat(glucides)||0;const brBase=g>0 ? g/cfg.ratioIC : 0;const bc=glyEff&&glyEff>cfg.ciblePre ? (glyEff-cfg.ciblePre)/cfg.fc : 0;const br=brBase*(1-reducFactor);return{br:br.toFixed(1),brBase:brBase.toFixed(1),bc:bc.toFixed(1),total:(br+bc).toFixed(1),reduc:reducFactor};})() : null;
   const totB=(parseFloat(insulR)||0)+(parseFloat(bolus)||0);
-  const save=()=>{onSave({time,desc,glucides,glyManuelle:glyMan,insulineRapide:insulR,bolusCorrection:bolus,photo,glycemieAuto:glyAuto ? glyAuto.value : null,glyEffective:glyEff ? glyEff.toFixed(2) : null,doseSuggeree:s ? s.total : null});setOpen(false);};
+  const save=()=>{onSave({time,desc,glucides,glyManuelle:glyMan,insulineRapide:insulR,bolusCorrection:bolus,photo,glycemieAuto:glyAuto ? glyAuto.value : null,glyEffective:glyEff ? glyEff.toFixed(2) : null,doseSuggeree:s ? s.total : null,sportPrevu,sportIntensite:sportPrevu?sportIntensite:null});setOpen(false);};
   return(<div style={{borderRadius:14,border:"1.5px solid "+(saved ? meal.color : C.border),background:"white",marginBottom:10}}>
     <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -464,8 +490,22 @@ function MealBlock({meal,saved,onSave,onDelete,cfg,curve,apiKey}) {
         <button onClick={()=>setShowAI(!showAI)} style={{padding:"9px 10px",background:showAI ? "#fff7ed" : "white",color:C.orange,border:"1.5px solid "+C.orange,borderRadius:8,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit",width:"100%"}}>IA</button>
       </div>
       {showAI&&<GlucidesAI initDesc={desc} onAccept={v=>{setGlucides(String(v));setShowAI(false);}} apiKey={apiKey} photo={photo}/>}
+      {/* Sport prevu dans les 2h */}
+      <div style={{marginTop:12,background:sportPrevu?"#ecfeff":"#fafaf8",border:"1.5px solid "+(sportPrevu?"#0891b2":C.border),borderRadius:10,padding:"10px 14px"}}>
+        <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+          <input type="checkbox" checked={sportPrevu} onChange={e=>setSportPrevu(e.target.checked)} style={{width:18,height:18,cursor:"pointer",accentColor:"#0891b2"}}/>
+          <span style={{fontWeight:700,fontSize:13,color:sportPrevu?"#0891b2":C.text}}>Sport prevu dans les 2h ?</span>
+        </label>
+        {sportPrevu&&(<div style={{marginTop:10}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:8}}>L intensite reduit le bolus repas pour eviter l hypo a l effort.{reducPersonnalisee?" Reduction personnalisee selon ton historique ("+profilInt.count+" seances, baisse ~"+profilInt.avgDropPerHour+" g/L/h).":""}</div>
+          <div style={{display:"flex",gap:6}}>
+            {[["leger","Leger"],["modere","Modere"],["intense","Intense"]].map(([k,l])=>{const pf=sportProfil&&sportProfil[k];const pct=pf?Math.round(pf.reduc*100):({leger:20,modere:33,intense:50})[k];return <button key={k} onClick={()=>setSportIntensite(k)} style={{flex:1,padding:"7px 4px",border:"2px solid "+(sportIntensite===k?"#0891b2":C.border),borderRadius:8,background:sportIntensite===k?"#0891b2":"transparent",color:sportIntensite===k?"white":C.muted,cursor:"pointer",fontWeight:700,fontSize:11,fontFamily:"inherit"}}>{l+" -"+pct+"%"}{pf&&pf.personalized?"*":""}</button>;})}
+          </div>
+        </div>)}
+      </div>
       {s&&(<div style={{background:"#fef2f2",border:"1.5px solid #fca5a5",borderRadius:10,padding:"12px 14px",marginTop:12}}>
-        <div style={{fontWeight:700,color:C.red,fontSize:12,marginBottom:8}}>Dose suggeree</div>
+        <div style={{fontWeight:700,color:C.red,fontSize:12,marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}><span>Dose suggeree</span>{s.reduc>0&&<span style={{background:"#0891b2",color:"white",borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700}}>{"Sport -"+Math.round(s.reduc*100)+"%"}</span>}</div>
+        {s.reduc>0&&<div style={{fontSize:11,color:"#0891b2",marginBottom:8,background:"#ecfeff",borderRadius:6,padding:"6px 8px"}}>{"Bolus repas reduit de "+s.brBase+" a "+s.br+" UI (sport prevu). Surveillez la glycemie pendant et apres l effort."}</div>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:8}}>
           {[["Bolus repas",s.br+" UI"],["Correction",s.bc+" UI"],["Total",s.total+" UI"]].map(([l,v])=><div key={l} style={{textAlign:"center",background:"white",borderRadius:6,padding:"6px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontWeight:800,color:C.red,fontSize:14}}>{v}</div></div>)}
         </div>
@@ -1086,6 +1126,235 @@ function ScreenshotPanel({value,onChange}){
   </div>);
 }
 
+// APPRENTISSAGE SPORT: mesure la baisse glycemique reelle par intensite a partir
+// des activites enregistrees, pour personnaliser la reduction de bolus preventive.
+function sportLearning(allData, cfg){
+  const byIntensity = {leger:[], modere:[], intense:[]};
+  const days = allData.days || {};
+  Object.keys(days).forEach(dk=>{
+    const day = days[dk];
+    const curve = day.dexcomCurve || [];
+    if(!curve.length) return;
+    (day.activites||[]).forEach(a=>{
+      if(!a.type || !a.duree) return;
+      const dureeMin = parseInt(a.duree)||0;
+      if(dureeMin<=0) return;
+      const [h,m] = (a.time||"12:00").split(":").map(Number);
+      const startMin = h*60+m;
+      const endMin = startMin + dureeMin + 60;
+      const glyAt = targetMin => {
+        let best=null, bd=Infinity;
+        curve.forEach(p=>{const [ph,pm]=p.time.split(":").map(Number);const pmin=ph*60+pm;const d=Math.abs(pmin-targetMin);if(d<bd&&d<=30){bd=d;best=parseFloat(p.value);}});
+        return best;
+      };
+      const startGly = a.glyAvant ? parseFloat(a.glyAvant) : glyAt(startMin);
+      const endGly = glyAt(endMin);
+      if(startGly==null || endGly==null || isNaN(startGly) || isNaN(endGly)) return;
+      const drop = startGly - endGly;
+      const exHours = dureeMin/60;
+      const dropPerHour = drop/exHours;
+      if(byIntensity[a.type]) byIntensity[a.type].push({drop, dropPerHour, duree:dureeMin});
+    });
+  });
+
+  const typical = {leger:0.30, modere:0.60, intense:0.90};
+  const defaultReduc = {leger:0.20, modere:0.33, intense:0.50};
+  const median = arr => {if(!arr.length)return null;const s=[...arr].sort((a,b)=>a-b);const mi=Math.floor(s.length/2);return s.length%2?s[mi]:(s[mi-1]+s[mi])/2;};
+
+  const result = {};
+  ["leger","modere","intense"].forEach(k=>{
+    const arr = byIntensity[k];
+    const drops = arr.map(x=>x.dropPerHour).filter(d=>d>0);
+    if(drops.length>=2){
+      const med = median(drops);
+      let factor = defaultReduc[k] * (med/typical[k]);
+      factor = Math.max(0.10, Math.min(0.70, factor));
+      result[k] = {count:drops.length, avgDropPerHour:med.toFixed(2), reduc:Math.round(factor*100)/100, personalized:true};
+    } else {
+      result[k] = {count:arr.length, reduc:defaultReduc[k], personalized:false};
+    }
+  });
+  return result;
+}
+
+// ANALYSE BACKEND SUR 3 JOURS: croise gly pre-prandiale -> post-prandiale (+2h)
+// pour evaluer ratios IC et facteurs de correction. Exclut les repas avec sport.
+function analyseRatios3Jours(allData, cfg, refDayIso){
+  const ref = new Date(refDayIso+"T12:00:00");
+  const dayKeys = [];
+  for(let i=0;i<3;i++){const d=new Date(ref);d.setDate(d.getDate()-i);dayKeys.push(toISO(d));}
+
+  const samples = []; // chaque repas analysable
+  dayKeys.forEach(dk=>{
+    const day = allData.days && allData.days[dk];
+    if(!day) return;
+    const curve = day.dexcomCurve || [];
+    MEALS.forEach(m=>{
+      const meal = day.meals && day.meals[m.id];
+      if(!meal) return;
+      const glyPre = parseFloat(meal.glyManuelle||meal.glycemieAuto||meal.glyEffective);
+      const glucides = parseFloat(meal.glucides)||0;
+      const doseInj = (parseFloat(meal.insulineRapide)||0)+(parseFloat(meal.bolusCorrection)||0);
+      if(!glyPre || !glucides || doseInj<0.5) return;
+      // Sport pendant/apres ce repas = exclu (fausse l analyse des ratios)
+      if(meal.sportPrevu) return;
+      // Trouver la glycemie post-prandiale a +2h depuis la courbe
+      if(!curve.length) return;
+      const [h,mm] = meal.time.split(":").map(Number);
+      const preMin = h*60+mm;
+      const postTarget = preMin+120; // +2h
+      // Chercher le point le plus proche de +2h (tolerance 30 min)
+      let best=null, bestDiff=Infinity;
+      curve.forEach(p=>{
+        const [ph,pm]=p.time.split(":").map(Number);
+        const pmin=ph*60+pm;
+        const diff=Math.abs(pmin-postTarget);
+        if(diff<bestDiff && diff<=30){bestDiff=diff;best=p;}
+      });
+      if(!best) return;
+      const glyPost = parseFloat(best.value);
+      // Verifier qu il y a eu de l activite sportive enregistree autour (exclusion)
+      const sportAutour = (day.activites||[]).some(a=>{
+        const [ah,am]=(a.time||"12:00").split(":").map(Number);
+        const amin=ah*60+am;
+        return amin>=preMin-30 && amin<=postTarget+30;
+      });
+      if(sportAutour) return;
+      samples.push({day:dk, repas:m.label, glyPre, glyPost, glucides, doseInj, deltaGly:glyPost-glyPre});
+    });
+  });
+
+  if(samples.length<2) return {enough:false, sampleCount:samples.length};
+
+  // Estimation ratio IC: pour les repas ou glyPre etait DANS la cible (peu de correction),
+  // on regarde si glyPost revient pres de la cible. Si glyPost trop haut -> ratio trop faible (pas assez d insuline).
+  // Methode: ratio ideal = glucides / (doseInj + ajustement pour ramener glyPost a cible)
+  const icEstimates = [];
+  const fcEstimates = [];
+  samples.forEach(s=>{
+    // Part correction dans la dose injectee
+    const corrPart = s.glyPre>cfg.ciblePre ? (s.glyPre-cfg.ciblePre)/cfg.fc : 0;
+    const mealPart = s.doseInj - corrPart;
+    if(mealPart>0.5 && s.glucides>10){
+      // Ajustement: si glyPost s ecarte de la cible, la dose repas aurait du etre differente
+      // ecart de dose necessaire = (glyPost - ciblePost) / fc, avec ciblePost = milieu de cible
+      const ciblePost = (cfg.tMin+cfg.tMax)/2;
+      const doseAjust = mealPart + (s.glyPost-ciblePost)/cfg.fc;
+      if(doseAjust>0.5){
+        const icReel = s.glucides/doseAjust;
+        // Garde-fou: ignorer valeurs aberrantes
+        if(icReel>3 && icReel<40) icEstimates.push(icReel);
+      }
+    }
+    // Estimation FC: sur les repas ou la correction etait significative
+    if(corrPart>=1 && s.glucides<20){
+      // si glyPost loin de cible, le FC est mal calibre
+      const ciblePost = (cfg.tMin+cfg.tMax)/2;
+      const baisseObtenue = s.glyPre - s.glyPost;
+      if(baisseObtenue>0 && corrPart>0){
+        const fcReel = baisseObtenue/corrPart;
+        if(fcReel>0.1 && fcReel<1.5) fcEstimates.push(fcReel);
+      }
+    }
+  });
+
+  const median = arr => {if(!arr.length)return null;const s=[...arr].sort((a,b)=>a-b);const m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;};
+
+  const icMed = median(icEstimates);
+  const fcMed = median(fcEstimates);
+
+  // Lissage: 60% nouvelle estimation, 40% valeur actuelle
+  const icSuggere = icMed ? Math.round((icMed*0.6+cfg.ratioIC*0.4)*2)/2 : null;
+  const fcSuggere = fcMed ? Math.round((fcMed*0.6+cfg.fc*0.4)*20)/20 : null;
+
+  // Stats post-prandiales
+  const postVals = samples.map(s=>s.glyPost);
+  const avgPost = postVals.reduce((a,b)=>a+b,0)/postVals.length;
+  const ciblePost=(cfg.tMin+cfg.tMax)/2;
+
+  return {
+    enough:true,
+    sampleCount:samples.length,
+    samples,
+    icActuel:cfg.ratioIC, icSuggere, icChange: icSuggere ? Math.round((icSuggere-cfg.ratioIC)*10)/10 : 0,
+    fcActuel:cfg.fc, fcSuggere, fcChange: fcSuggere ? Math.round((fcSuggere-cfg.fc)*100)/100 : 0,
+    avgPost: avgPost.toFixed(2), ciblePost: ciblePost.toFixed(2),
+    tendance: avgPost>cfg.tMax ? "Glycemies post-prandiales souvent trop hautes (ratio possiblement trop faible)" : avgPost<cfg.tMin ? "Glycemies post-prandiales souvent trop basses (ratio possiblement trop fort)" : "Glycemies post-prandiales globalement dans la cible"
+  };
+}
+
+// SITUATION ACTUELLE DU PATIENT: TIR, moyenne, variabilite, schemas recurrents, gly live
+function situationActuelle(allData, cfg, refDayIso){
+  const ref = new Date(refDayIso+"T12:00:00");
+  // Recuperer tous les points sur les 7 derniers jours
+  const allPts = [];
+  for(let i=0;i<7;i++){
+    const d=new Date(ref);d.setDate(d.getDate()-i);
+    const dk=toISO(d);
+    const day=allData.days&&allData.days[dk];
+    if(day&&day.dexcomCurve){day.dexcomCurve.forEach(p=>allPts.push({...p,dayKey:dk}));}
+  }
+
+  const live = allData.liveGly||null;
+
+  if(allPts.length<5){
+    return {enough:false, live};
+  }
+
+  const vals = allPts.map(p=>parseFloat(p.value)).filter(v=>!isNaN(v));
+  const n = vals.length;
+  const avg = vals.reduce((a,b)=>a+b,0)/n;
+  const variance = vals.reduce((a,v)=>a+Math.pow(v-avg,2),0)/n;
+  const ecartType = Math.sqrt(variance);
+  const cv = (ecartType/avg)*100; // coefficient de variation
+
+  // Time In Range
+  const inRange = vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length;
+  const below = vals.filter(v=>v<cfg.tMin).length;
+  const severeLow = vals.filter(v=>v<0.70).length;
+  const above = vals.filter(v=>v>cfg.tMax).length;
+  const severeHigh = vals.filter(v=>v>2.50).length;
+  const tir = Math.round(inRange/n*100);
+  const tBelow = Math.round(below/n*100);
+  const tAbove = Math.round(above/n*100);
+
+  // Detection de schemas: hypos nocturnes recurrentes (0h-6h)
+  let nightLows=0, nightPts=0;
+  allPts.forEach(p=>{
+    const h=parseInt(p.time.split(":")[0]);
+    if(h>=0&&h<6){nightPts++;if(parseFloat(p.value)<cfg.tMin)nightLows++;}
+  });
+  const hypoNocturne = nightPts>5 && (nightLows/nightPts)>0.15;
+
+  // Schema: hyperglycemie matinale (phenomene de l aube) 6h-9h
+  let dawnHigh=0, dawnPts=0;
+  allPts.forEach(p=>{
+    const h=parseInt(p.time.split(":")[0]);
+    if(h>=6&&h<9){dawnPts++;if(parseFloat(p.value)>cfg.tMax)dawnHigh++;}
+  });
+  const phenomeneAube = dawnPts>5 && (dawnHigh/dawnPts)>0.4;
+
+  const schemas=[];
+  if(hypoNocturne) schemas.push("Hypoglycemies nocturnes recurrentes (0h-6h) - dose de lente possiblement trop forte ou collation du soir a revoir");
+  if(phenomeneAube) schemas.push("Hyperglycemie matinale frequente (phenomene de l aube) - besoin accru d insuline au reveil");
+  if(severeLow>0) schemas.push(severeLow+" episode(s) d hypoglycemie severe (<0.70 g/L) sur 7 jours");
+  if(severeHigh>0) schemas.push(severeHigh+" episode(s) d hyperglycemie severe (>2.50 g/L) sur 7 jours");
+  if(cv>36) schemas.push("Variabilite glycemique elevee (CV "+Math.round(cv)+"%) - glycemies en montagnes russes, stabilite a ameliorer");
+
+  return {
+    enough:true,
+    live,
+    periode:"7 jours",
+    nbMesures:n,
+    moyenne:avg.toFixed(2),
+    ecartType:ecartType.toFixed(2),
+    cv:Math.round(cv),
+    tir, tBelow, tAbove, severeLow, severeHigh,
+    schemas,
+    glyEstimee: avg ? Math.round((avg*0.1)*(28.7))+ " (HbA1c estimee approx %)" : null
+  };
+}
+
 function analyseLocal(dayData,cfg){
   const curve=dayData.dexcomCurve||[],meals=dayData.meals||{},correctifs=dayData.correctifs||[];
   const obs=[],conseils=[],recos=[];
@@ -1129,14 +1398,16 @@ function analyseLocal(dayData,cfg){
   return{resume,observations:obs,correlations:[],recommandations:recos,score_equilibre:score,conseils_dosage:conseils};
 }
 
-function AnalysePanel({dayData,dayLabel,cfg,apiKey}) {
+function AnalysePanel({dayData,dayLabel,cfg,apiKey,allData,refDayIso}) {
   const [open,setOpen]=useState(false);
   const [result,setResult]=useState(null);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState(null);
   const hasData=(dayData.meals&&Object.keys(dayData.meals).length>0)||(dayData.dexcomCurve&&dayData.dexcomCurve.length>0)||(dayData.correctifs&&dayData.correctifs.length>0);
-  const run=()=>{setErr(null);setResult(analyseLocal(dayData,cfg));};
-  const enhance=async()=>{setLoading(true);setErr(null);try{const r=await aiAnalyse({...dayData,label:dayLabel},cfg,apiKey);setResult({...r,_ai:true});}catch(e){setErr("IA indisponible ("+e.message+")");}finally{setLoading(false);};};
+  const ratios3j=allData ? analyseRatios3Jours(allData,cfg,refDayIso||TODAY()) : null;
+  const situation=allData ? situationActuelle(allData,cfg,refDayIso||TODAY()) : null;
+  const run=()=>{setErr(null);setResult({...analyseLocal(dayData,cfg),_ratios3j:ratios3j,_situation:situation});};
+  const enhance=async()=>{setLoading(true);setErr(null);try{const r=await aiAnalyse({...dayData,label:dayLabel},cfg,apiKey,ratios3j,situation);setResult({...r,_ai:true,_ratios3j:ratios3j,_situation:situation});}catch(e){setErr("IA indisponible ("+e.message+")");}finally{setLoading(false);};};
   const sc=s=>s>=8 ? C.green : s>=5 ? C.orange : C.red;
   return(<div style={{borderRadius:14,border:"1.5px solid "+C.purple,background:"#faf5ff",marginBottom:10}}>
     <div onClick={()=>setOpen(!open)} style={{padding:"14px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1166,6 +1437,33 @@ function AnalysePanel({dayData,dayLabel,cfg,apiKey}) {
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:6}}>{[["Injecte",(d.dose_injectee||"?")+" UI",C.red],["Ideale",(d.dose_ideale||"?")+" UI",dc],["Ecart",(ecart>0 ? "+" : "")+ecart+" UI",dc]].map(([l,v,col])=><div key={l} style={{textAlign:"center",background:col+"11",borderRadius:6,padding:"5px 3px"}}><div style={{fontSize:9,color:C.muted}}>{l}</div><div style={{fontSize:12,fontWeight:700,color:col}}>{v}</div></div>)}</div>
             {d.explication&&<p style={{fontSize:12,color:C.muted,margin:0,lineHeight:1.4}}>{d.explication}</p>}
           </div>);})}
+        </div>)}
+        {/* SITUATION ACTUELLE */}
+        {result._situation&&result._situation.enough&&(<div style={{marginBottom:10,background:"white",borderRadius:10,border:"1.5px solid "+C.blue,padding:14}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.blue,textTransform:"uppercase",marginBottom:8}}>Situation actuelle ({result._situation.periode})</div>
+          {result._situation.live&&result._situation.live.value&&(<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"8px 10px",background:"#eff6ff",borderRadius:8}}>
+            <span style={{fontSize:22,fontWeight:800,color:glyColor(result._situation.live.value,cfg)}}>{result._situation.live.value}</span>
+            <span style={{fontSize:12,color:C.muted}}>{"g/L "+(result._situation.live.trend||"")+" maintenant"}</span>
+          </div>)}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:8}}>
+            {[["TIR",result._situation.tir+"%",result._situation.tir>=70?C.green:result._situation.tir>=50?C.orange:C.red],["Moyenne",result._situation.moyenne,C.blue],["Variabilite",result._situation.cv+"%",result._situation.cv<=36?C.green:C.orange]].map(([l,v,col])=><div key={l} style={{textAlign:"center",background:col+"11",borderRadius:6,padding:"6px 3px"}}><div style={{fontSize:9,color:C.muted}}>{l}</div><div style={{fontSize:14,fontWeight:800,color:col}}>{v}</div></div>)}
+          </div>
+          {result.situation_actuelle&&(<div style={{fontSize:12,color:C.text,lineHeight:1.5}}>
+            {result.situation_actuelle.bilan_global&&<p style={{margin:"6px 0"}}><strong>Bilan: </strong>{result.situation_actuelle.bilan_global}</p>}
+            {result.situation_actuelle.point_immediat&&<p style={{margin:"6px 0",padding:"8px 10px",background:"#eff6ff",borderRadius:8,borderLeft:"3px solid "+C.blue}}><strong>Maintenant: </strong>{result.situation_actuelle.point_immediat}</p>}
+            {result.situation_actuelle.tendance_a_surveiller&&<p style={{margin:"6px 0",fontSize:12,color:C.muted}}><strong>A surveiller: </strong>{result.situation_actuelle.tendance_a_surveiller}</p>}
+          </div>)}
+          {result._situation.schemas&&result._situation.schemas.length>0&&(<div style={{marginTop:8}}>
+            {result._situation.schemas.map((s,i)=><div key={i} style={{fontSize:11,color:"#92400e",background:"#fffbeb",borderRadius:6,padding:"6px 8px",marginBottom:4}}>{s}</div>)}
+          </div>)}
+        </div>)}
+        {/* RATIOS 3 JOURS */}
+        {result._ratios3j&&result._ratios3j.enough&&(result._ratios3j.icSuggere||result._ratios3j.fcSuggere)&&(<div style={{marginBottom:10,background:"white",borderRadius:10,border:"1.5px solid "+C.purple,padding:14}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.purple,textTransform:"uppercase",marginBottom:4}}>Ratios calcules sur 3 jours</div>
+          <div style={{fontSize:10,color:C.muted,marginBottom:8}}>{result._ratios3j.sampleCount+" repas analyses (sport exclu) - post-prandial a +2h"}</div>
+          {result._ratios3j.icSuggere&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"#faf5ff",borderRadius:8,marginBottom:6}}><span style={{fontSize:12}}>Ratio IC</span><span style={{fontSize:13,fontWeight:700}}>{"1/"+result._ratios3j.icActuel+" -> 1/"+result._ratios3j.icSuggere}</span></div>}
+          {result._ratios3j.fcSuggere&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"#faf5ff",borderRadius:8,marginBottom:6}}><span style={{fontSize:12}}>Facteur correction</span><span style={{fontSize:13,fontWeight:700}}>{result._ratios3j.fcActuel+" -> "+result._ratios3j.fcSuggere}</span></div>}
+          <div style={{fontSize:11,color:C.muted,fontStyle:"italic",marginTop:4}}>Indicatif - a valider avec votre medecin avant tout changement.</div>
         </div>)}
         {result.recommandations&&result.recommandations.length>0&&(<div style={{marginBottom:10}}>
           <div style={{fontSize:11,fontWeight:700,color:C.green,textTransform:"uppercase",marginBottom:8}}>Recommandations</div>
@@ -1326,6 +1624,7 @@ export default function App(){
   const day=(allData.days&&allData.days[activeDay])||{};
   const upDay=patch=>{const newDay={...day,...patch};const newDays={...allData.days};newDays[activeDay]=newDay;saveAll({...allData,days:newDays});};
   const yday=prevDay(activeDay);
+  const sportProfil=sportLearning(allData,cfg);
   const ydayData=(allData.days&&allData.days[yday])||{};
   const weekDays=Array.from({length:7},(_,i)=>{const d=new Date(rFrom+"T12:00:00");d.setDate(d.getDate()+i);return toISO(d);});
 
@@ -1355,7 +1654,7 @@ export default function App(){
       {day.dexcomCurve&&day.dexcomCurve.length>0 ? (<div style={{background:"white",border:"1.5px solid #93c5fd",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontWeight:700,fontSize:13,color:C.blue}}>{allData.libreCreds ? "Courbe FreeStyle Libre" : allData.dexcomOAuth ? "Courbe Dexcom" : "Courbe glycemie"}</span><span style={{fontSize:11,color:C.muted}}>{day.dexcomCurve.length+" pts"}</span></div>
         <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
-          {[["today","Aujourd hui"],["full","00h-24h"],["24h","24h glissantes"],["4h","4h glissantes"]].map(([k,l])=><button key={k} onClick={()=>setGraphView(k)} style={{padding:"4px 10px",borderRadius:6,border:"1px solid "+(graphView===k ? C.blue : C.border),background:graphView===k ? C.blue : "white",color:graphView===k ? "white" : C.muted,fontWeight:600,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>)}
+          {[["today","Standard"],["full","00h-24h"],["24h","24h glissantes"],["4h","4h glissantes"]].map(([k,l])=><button key={k} onClick={()=>setGraphView(k)} style={{padding:"4px 10px",borderRadius:6,border:"1px solid "+(graphView===k ? C.blue : C.border),background:graphView===k ? C.blue : "white",color:graphView===k ? "white" : C.muted,fontWeight:600,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>)}
         </div>
         {(()=>{
           const now=new Date();
@@ -1376,8 +1675,8 @@ export default function App(){
         {(()=>{const vals=day.dexcomCurve.map(p=>parseFloat(p.value));const avg=(vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(2);const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);const above=Math.round(vals.filter(v=>v>cfg.tMax).length/vals.length*100);return(<div style={{display:"flex",gap:8,marginTop:8}}>{[["Moyenne",avg+" g/L",C.blue],["Temps cible",tir+"%",tir>=70 ? C.green : C.orange],["Au-dessus",above+"%",above>20 ? C.red : C.green]].map(([l,v,col])=><div key={l} style={{flex:1,textAlign:"center",background:col+"11",borderRadius:8,padding:"5px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontSize:13,fontWeight:700,color:col}}>{v}</div></div>)}</div>);})()} 
       </div>) : (<div style={{background:"#eff6ff",border:"1.5px dashed #93c5fd",borderRadius:12,padding:"14px 16px",marginBottom:12,textAlign:"center"}}><div style={{fontSize:13,color:C.blue,fontWeight:600}}>Aucune courbe - connectez un capteur dans Parametres</div></div>)}
       <AdaptiveBanner allData={allData} cfg={cfg} onApply={nc=>saveAll({...allData,cfg:nc})}/>
-      <AnalysePanel dayData={ydayData} dayLabel={fmtDay(yday)} cfg={cfg} apiKey={apiKey}/>
-      {MEALS.map(m=>{const onSave=data=>{const nm={...day.meals||{}};nm[m.id]=data;upDay({meals:nm});};const onDel=()=>{const ms={...day.meals||{}};delete ms[m.id];upDay({meals:ms});};return <MealBlock key={m.id} meal={m} saved={(day.meals&&day.meals[m.id])||null} onSave={onSave} onDelete={onDel} cfg={cfg} curve={day.dexcomCurve||null} apiKey={apiKey}/>;  })}
+      <AnalysePanel dayData={ydayData} dayLabel={fmtDay(yday)} cfg={cfg} apiKey={apiKey} allData={allData} refDayIso={yday}/>
+      {MEALS.map(m=>{const onSave=data=>{const nm={...day.meals||{}};nm[m.id]=data;upDay({meals:nm});};const onDel=()=>{const ms={...day.meals||{}};delete ms[m.id];upDay({meals:ms});};return <MealBlock key={m.id} meal={m} saved={(day.meals&&day.meals[m.id])||null} onSave={onSave} onDelete={onDel} cfg={cfg} curve={day.dexcomCurve||null} apiKey={apiKey} sportProfil={sportProfil}/>;  })}
       <CorrectifBlock entries={day.correctifs||[]} onAdd={e=>upDay({correctifs:[...(day.correctifs||[]),e]})} onDelete={id=>upDay({correctifs:(day.correctifs||[]).filter(x=>x.id!==id)})} cfg={cfg}/>
       <ActivityBlock entries={day.activites||[]} onAdd={e=>upDay({activites:[...(day.activites||[]),e]})} onDelete={id=>upDay({activites:(day.activites||[]).filter(x=>x.id!==id)})} cfg={cfg}/>
     </div>)}
