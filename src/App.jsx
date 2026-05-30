@@ -169,8 +169,13 @@ async function aiAnalyse(dayCtx,cfg,apiKey,ratios3j,situation){
       const ageMin=situation.live.updatedAt?Math.round((Date.now()-situation.live.updatedAt)/60000):null;
       lines.push("GLYCEMIE LIVE MAINTENANT: "+situation.live.value+" g/L "+(situation.live.trend||"")+(ageMin!==null?" (il y a "+ageMin+" min)":""));
     }
+    if(situation.correctionLive){
+      const cl=situation.correctionLive;
+      if(cl.type==="haut")lines.push("ACTION POSSIBLE: glycemie trop haute, bolus de correction calcule = "+cl.bolus+" UI (a valider)"+(cl.alerte?" - "+cl.alerte:""));
+      else lines.push("ACTION POSSIBLE: glycemie trop basse, resucrage ~"+cl.resucrage+"g"+(cl.alerte?" - "+cl.alerte:""));
+    }
   }
-  const instr="\n=== MISSION ===\nTu es un diabetologue expert qui accompagne ce patient diabetique de type 1. Analyse la journee de la veille ET fais un point clair sur sa situation actuelle.\n\nUtilise les calculs backend fournis (ratios 3 jours, TIR, schemas) comme base FACTUELLE - ne recalcule pas, commente et explique.\n\nPriorite: aider le patient sur sa SITUATION ACTUELLE (glycemie live + tendance + ce qu il doit surveiller maintenant ou dans les prochaines heures).\n\nReponds en JSON brut valide: {resume (2-3 phrases sur la veille),score_equilibre (0-10),analyse_doses:[{repas,dose_injectee,dose_ideale,ecart,explication}],adaptation_ratios:{ratioIC_actuel,ratioIC_suggere,fc_actuel,fc_suggere,explication (base sur les calculs 3 jours)},analyse_nocturne:{bilan,suggestion_lente,risque_hypo_nuit},situation_actuelle:{bilan_global (TIR, variabilite, equilibre 7j),point_immediat (que faire maintenant vu la gly live et les schemas),tendance_a_surveiller},recommandations:[string]}\n\nIMPORTANT: tes suggestions de ratios/doses sont indicatives et le patient doit valider avec son medecin. Ne propose jamais de changement brutal.";
+  const instr="\n=== MISSION ===\nTu es un diabetologue expert qui accompagne ce patient diabetique de type 1. La journee analysee peut etre EN COURS (incomplete) - c est normal, analyse ce qui est disponible sans exiger une journee complete.\n\nObjectifs par ordre de priorite:\n1. SITUATION ACTUELLE: commente la glycemie live. Si elle est trop haute, propose clairement le bolus de correction calcule (rappelle le chiffre). Si trop basse, conseille le resucrage. Indique quoi surveiller dans les prochaines heures.\n2. ANALYSE DES REPAS DEJA PRIS: pour chaque repas, compare dose injectee vs ideale. Si la glycemie post-prandiale (sur la courbe ~2h apres) est trop haute, explique que le repas etait soit plus sucre que prevu (glucides sous-estimes), soit l insuline insuffisante. Sois concret.\n3. Utilise les calculs backend (ratios 3j, TIR, schemas) comme base FACTUELLE - commente, ne recalcule pas.\n\nReponds en JSON brut valide: {resume (2-3 phrases sur la journee en cours ou passee),score_equilibre (0-10 ou null si journee trop incomplete),analyse_doses:[{repas,dose_injectee,dose_ideale,ecart,explication}],adaptation_ratios:{ratioIC_actuel,ratioIC_suggere,fc_actuel,fc_suggere,explication},analyse_nocturne:{bilan,suggestion_lente,risque_hypo_nuit},situation_actuelle:{bilan_global,point_immediat (action concrete MAINTENANT, avec le bolus de correction chiffre si gly haute),tendance_a_surveiller},recommandations:[string]}\n\nIMPORTANT: tes suggestions de doses/correction sont indicatives, le patient valide avec son jugement et son medecin. Ne propose jamais de changement brutal de ratio.";
   let res;
   try{res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getHDRS(apiKey),
     body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1000,messages:[{role:"user",content:lines.join("\n")+instr}]})});}
@@ -1353,17 +1358,32 @@ function situationActuelle(allData, cfg, refDayIso){
   if(severeHigh>0) schemas.push(severeHigh+" episode(s) d hyperglycemie severe (>2.50 g/L) sur 7 jours");
   if(cv>36) schemas.push("Variabilite glycemique elevee (CV "+Math.round(cv)+"%) - glycemies en montagnes russes, stabilite a ameliorer");
 
+  // Suggestion de correction immediate si la glycemie live est hors cible
+  let correctionLive = null;
+  if(live && live.value){
+    const lv = parseFloat(live.value);
+    if(lv > cfg.tMax){
+      const bolusCorr = (lv - cfg.ciblePre)/cfg.fc;
+      correctionLive = {type:"haut", valeur:lv, bolus: Math.max(0,bolusCorr).toFixed(1), message:"Glycemie au-dessus de la cible"};
+      if(lv > 2.50) correctionLive.alerte = "Hyperglycemie severe - verifiez les cetones";
+    } else if(lv < cfg.tMin){
+      const resucrage = Math.round((cfg.ciblePre - lv)/cfg.fc * 10);
+      correctionLive = {type:"bas", valeur:lv, resucrage: Math.max(10,resucrage), message:"Glycemie sous la cible - resucrage conseille"};
+      if(lv < 0.70) correctionLive.alerte = "Hypoglycemie - resucrez-vous immediatement (15g)";
+    }
+  }
+
   return {
     enough:true,
     live,
+    correctionLive,
     periode:"7 jours",
     nbMesures:n,
     moyenne:avg.toFixed(2),
     ecartType:ecartType.toFixed(2),
     cv:Math.round(cv),
     tir, tBelow, tAbove, severeLow, severeHigh,
-    schemas,
-    glyEstimee: avg ? Math.round((avg*0.1)*(28.7))+ " (HbA1c estimee approx %)" : null
+    schemas
   };
 }
 
@@ -1457,6 +1477,17 @@ function AnalysePanel({dayData,dayLabel,cfg,apiKey,allData,refDayIso}) {
           {result._situation.live&&result._situation.live.value&&(<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"8px 10px",background:"#eff6ff",borderRadius:8}}>
             <span style={{fontSize:22,fontWeight:800,color:glyColor(result._situation.live.value,cfg)}}>{result._situation.live.value}</span>
             <span style={{fontSize:12,color:C.muted}}>{"g/L "+(result._situation.live.trend||"")+" maintenant"}</span>
+          </div>)}
+          {result._situation.correctionLive&&result._situation.correctionLive.type==="haut"&&(<div style={{marginBottom:10,padding:"10px 12px",background:"#fef2f2",border:"1.5px solid #fca5a5",borderRadius:8}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.red,marginBottom:4}}>Correction suggeree</div>
+            <div style={{fontSize:13,color:C.text}}>{"Bolus de correction: "+result._situation.correctionLive.bolus+" UI pour revenir vers la cible."}</div>
+            {result._situation.correctionLive.alerte&&<div style={{fontSize:12,color:C.red,fontWeight:700,marginTop:4}}>{result._situation.correctionLive.alerte}</div>}
+            <div style={{fontSize:10,color:C.muted,marginTop:4,fontStyle:"italic"}}>Indicatif - validez selon votre ressenti et l insuline deja active.</div>
+          </div>)}
+          {result._situation.correctionLive&&result._situation.correctionLive.type==="bas"&&(<div style={{marginBottom:10,padding:"10px 12px",background:"#fffbeb",border:"1.5px solid #fcd34d",borderRadius:8}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#92400e",marginBottom:4}}>Resucrage conseille</div>
+            <div style={{fontSize:13,color:C.text}}>{"Prenez environ "+result._situation.correctionLive.resucrage+"g de sucre rapide."}</div>
+            {result._situation.correctionLive.alerte&&<div style={{fontSize:12,color:C.red,fontWeight:700,marginTop:4}}>{result._situation.correctionLive.alerte}</div>}
           </div>)}
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:8}}>
             {[["TIR",result._situation.tir+"%",result._situation.tir>=70?C.green:result._situation.tir>=50?C.orange:C.red],["Moyenne",result._situation.moyenne,C.blue],["Variabilite",result._situation.cv+"%",result._situation.cv<=36?C.green:C.orange]].map(([l,v,col])=><div key={l} style={{textAlign:"center",background:col+"11",borderRadius:6,padding:"6px 3px"}}><div style={{fontSize:9,color:C.muted}}>{l}</div><div style={{fontSize:14,fontWeight:800,color:col}}>{v}</div></div>)}
@@ -1688,7 +1719,7 @@ export default function App(){
         {(()=>{const vals=day.dexcomCurve.map(p=>parseFloat(p.value));const avg=(vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(2);const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);const above=Math.round(vals.filter(v=>v>cfg.tMax).length/vals.length*100);return(<div style={{display:"flex",gap:8,marginTop:8}}>{[["Moyenne",avg+" g/L",C.blue],["Temps cible",tir+"%",tir>=70 ? C.green : C.orange],["Au-dessus",above+"%",above>20 ? C.red : C.green]].map(([l,v,col])=><div key={l} style={{flex:1,textAlign:"center",background:col+"11",borderRadius:8,padding:"5px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontSize:13,fontWeight:700,color:col}}>{v}</div></div>)}</div>);})()} 
       </div>) : (<div style={{background:"#eff6ff",border:"1.5px dashed #93c5fd",borderRadius:12,padding:"14px 16px",marginBottom:12,textAlign:"center"}}><div style={{fontSize:13,color:C.blue,fontWeight:600}}>Aucune courbe - connectez un capteur dans Parametres</div></div>)}
       <AdaptiveBanner allData={allData} cfg={cfg} onApply={nc=>saveAll({...allData,cfg:nc})}/>
-      <AnalysePanel dayData={ydayData} dayLabel={fmtDay(yday)} cfg={cfg} apiKey={apiKey} allData={allData} refDayIso={yday}/>
+      <AnalysePanel dayData={day} dayLabel={fmtDay(activeDay)} cfg={cfg} apiKey={apiKey} allData={allData} refDayIso={activeDay}/>
       {MEALS.map(m=>{const onSave=data=>{const nm={...day.meals||{}};nm[m.id]=data;upDay({meals:nm});};const onDel=()=>{const ms={...day.meals||{}};delete ms[m.id];upDay({meals:ms});};return <MealBlock key={m.id} meal={m} saved={(day.meals&&day.meals[m.id])||null} onSave={onSave} onDelete={onDel} cfg={cfg} curve={day.dexcomCurve||null} apiKey={apiKey} sportProfil={sportProfil}/>;  })}
       <CorrectifBlock entries={day.correctifs||[]} onAdd={e=>upDay({correctifs:[...(day.correctifs||[]),e]})} onDelete={id=>upDay({correctifs:(day.correctifs||[]).filter(x=>x.id!==id)})} cfg={cfg}/>
       <ActivityBlock entries={day.activites||[]} onAdd={e=>upDay({activites:[...(day.activites||[]),e]})} onDelete={id=>upDay({activites:(day.activites||[]).filter(x=>x.id!==id)})} cfg={cfg}/>
