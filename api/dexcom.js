@@ -138,7 +138,7 @@ async function handleLibre(action, body, res) {
     }).sort((a,b) => a.ts.localeCompare(b.ts));
     return res.status(200).json({
       readings,
-      current: current ? { value: mgToGL(current.ValueInMgPerDl), trend: litrend(current.TrendArrow), time: new Date(current.Timestamp).toTimeString().slice(0,5) } : null
+      current: current ? { value: mgToGL(current.ValueInMgPerDl), trend: litrend(current.TrendArrow), time: new Date(current.Timestamp).toTimeString().slice(0,5), ts: new Date(current.Timestamp).toISOString() } : null
     });
   }
 
