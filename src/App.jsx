@@ -78,6 +78,31 @@ async function aiGlucides(desc,apiKey){
   return r;
 }
 
+async function aiGlucidesPhoto(photoB64, desc, apiKey){
+  // Extraire le media type et les donnees base64
+  let mediaType="image/jpeg", data=photoB64;
+  const m=String(photoB64).match(/^data:([^;]+);base64,(.+)$/);
+  if(m){ mediaType=m[1]; data=m[2]; }
+  const promptText="Tu es un dieteticien expert specialise dans le comptage des glucides pour personnes diabetiques. Analyse cette photo de repas"+(desc?" (contexte fourni par l utilisateur: "+desc+")":"")+". Identifie chaque aliment visible, estime les portions, et calcule les glucides. Sois precis et prudent: en cas de doute sur la portion, donne une fourchette dans le conseil. Reponds UNIQUEMENT en JSON brut valide sans texte autour: {total:number (glucides totaux en grammes),confidence:string (\"haute\"|\"moyenne\"|\"faible\"),items:[{name:string,glucides:number}],conseil:string (remarque sur les portions ou l incertitude)}";
+  let res;
+  try{
+    res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:getHDRS(apiKey),
+      body:JSON.stringify({
+        model:"claude-sonnet-4-5",
+        max_tokens:1000,
+        messages:[{role:"user",content:[
+          {type:"image",source:{type:"base64",media_type:mediaType,data:data}},
+          {type:"text",text:promptText}
+        ]}]
+      })});
+  }catch(e){throw new Error("Connexion impossible: "+e.message);}
+  if(!res.ok){let m2="";try{const ed=await res.json();m2=(ed.error&&ed.error.message)||"";}catch(_){}throw new Error("Erreur API "+res.status+(m2?" - "+m2:""));}
+  let d;try{d=await res.json();}catch(e){throw new Error("Reponse illisible");}
+  const r=parseJSON(((d.content&&d.content.find(c=>c.type==="text"))||{}).text||"{}");
+  if(!r||r.total===undefined)throw new Error("Analyse photo incomplete. Reessayez avec une photo plus nette.");
+  return r;
+}
+
 async function aiAnalyse(dayCtx,cfg,apiKey){
   const lines=["Parametres: cible "+cfg.tMin+"-"+cfg.tMax+" g/L, ratio IC: 1UI/"+cfg.ratioIC+"g, FC: "+cfg.fc+" g/L/UI"];
   lines.push("Insuline lente: "+(cfg.lenteHab||"non renseignee")+" UI a "+(cfg.lenteHeure||"?"));
@@ -301,30 +326,48 @@ function DayCurve({pts,meals,cfg,width,height}){
   </svg>);
 }
 
-function GlucidesAI({initDesc,onAccept,apiKey,photo}){
+function GlucidesAI({initDesc,onAccept,apiKey,photo:mealPhoto}){
   const [desc,setDesc]=useState(initDesc||"");
   const [res,setRes]=useState(null);
   const [aiRes,setAiRes]=useState(null);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState(null);
+  const [photo,setPhoto]=useState(mealPhoto||null);
+  const photoRef=useRef();
   const estimate=()=>{if(!desc.trim())return;setErr(null);setAiRes(null);const r=estimateCarbsLocal(desc);if(!r.found){setRes({total:0,items:[],found:false});setErr("Aucun aliment reconnu. Essayez: pain, pates, riz, banane...");return;}setRes(r);};
-  const enhance=async()=>{setLoading(true);setErr(null);try{const r=photo ? await aiGlucidesPhoto(photo,desc,apiKey) : await aiGlucides(desc,apiKey);setAiRes(r);}catch(e){setErr("IA indisponible ("+e.message+").");}finally{setLoading(false);};};
+  const enhance=async()=>{if(!apiKey){setErr("Cle API manquante. Ajoutez-la dans Parametres.");return;}setLoading(true);setErr(null);try{const r=await aiGlucides(desc,apiKey);setAiRes(r);}catch(e){setErr("IA indisponible ("+e.message+").");}finally{setLoading(false);}};
+  const analysePhoto=async()=>{if(!apiKey){setErr("Cle API manquante. Ajoutez-la dans Parametres.");return;}if(!photo){setErr("Ajoutez d abord une photo du repas.");return;}setLoading(true);setErr(null);try{const r=await aiGlucidesPhoto(photo,desc,apiKey);setAiRes(r);}catch(e){setErr("Analyse photo impossible ("+e.message+").");}finally{setLoading(false);}};
   const active=aiRes||res;
+  const confColor=c=>c==="haute" ? C.green : c==="faible" ? C.red : C.orange;
   return(<div style={{background:"#fff7ed",border:"1.5px solid "+C.orange,borderRadius:12,padding:16,marginTop:10}}>
     <div style={{fontWeight:700,color:C.orange,fontSize:13,marginBottom:8}}>Estimation des glucides</div>
-    <textarea value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Ex: 2 tranches de pain, 1 banane..." rows={2} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box",marginBottom:8}}/>
-    <div style={{display:"flex",gap:8}}>
-      <PBtn onClick={estimate} disabled={!desc.trim()} color={C.blue} full small>Estimer</PBtn>
-      <button onClick={enhance} disabled={loading} style={{padding:"6px 12px",background:"white",color:C.orange,border:"1.5px solid "+C.orange,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>{loading ? "..." : "+ IA"}</button>
+    <textarea value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Ex: 2 tranches de pain, 1 banane... (optionnel avec photo)" rows={2} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:13,fontFamily:"inherit",resize:"vertical",boxSizing:"border-box",marginBottom:8}}/>
+    {/* Zone photo */}
+    <div style={{marginBottom:8}}>
+      {photo ? (<div style={{position:"relative"}}>
+        <img src={photo} alt="" style={{width:"100%",maxHeight:180,objectFit:"cover",borderRadius:8,border:"1.5px solid "+C.orange,display:"block",cursor:"pointer"}} onClick={()=>photoRef.current.click()}/>
+        <button onClick={()=>setPhoto(null)} style={{position:"absolute",top:6,right:6,background:"rgba(0,0,0,0.6)",color:"white",border:"none",borderRadius:6,padding:"3px 8px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Retirer</button>
+      </div>) : (<div onClick={()=>photoRef.current.click()} style={{border:"2px dashed "+C.orange,borderRadius:10,padding:"14px",cursor:"pointer",textAlign:"center",background:"#fffbeb",fontSize:13,color:C.orange,fontWeight:600}}>Prendre / choisir une photo du repas</div>)}
+      <input ref={photoRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{if(e.target.files[0]){setPhoto(await f2b64(e.target.files[0]));setAiRes(null);}}}/>
     </div>
+    {/* Boutons */}
+    {photo ? (
+      <PBtn onClick={analysePhoto} disabled={loading} color={C.orange} full>{loading ? "Analyse en cours..." : "Analyser la photo avec l IA"}</PBtn>
+    ) : (
+      <div style={{display:"flex",gap:8}}>
+        <PBtn onClick={estimate} disabled={!desc.trim()} color={C.blue} full small>Estimer (local)</PBtn>
+        <button onClick={enhance} disabled={loading||!desc.trim()} style={{padding:"6px 12px",background:"white",color:C.orange,border:"1.5px solid "+C.orange,borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit",whiteSpace:"nowrap"}}>{loading ? "..." : "+ IA"}</button>
+      </div>
+    )}
     {err&&<div style={{background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:8,padding:"8px 10px",marginTop:8,fontSize:12,color:"#92400e"}}>{err}</div>}
-    {active&&active.found!==false&&(<div style={{marginTop:10,background:"white",borderRadius:10,border:"1px solid "+C.border,overflow:"hidden"}}>
-      <div style={{background:aiRes ? C.green : C.blue,padding:"8px 12px",display:"flex",justifyContent:"space-between"}}>
-        <span style={{color:"white",fontWeight:800,fontSize:18}}>{active.total+"g"}</span>
-        <span style={{color:"white",fontSize:11}}>{aiRes ? "IA" : "local"}</span>
+    {active&&active.found!==false&&active.total!==undefined&&(<div style={{marginTop:10,background:"white",borderRadius:10,border:"1px solid "+C.border,overflow:"hidden"}}>
+      <div style={{background:aiRes ? C.green : C.blue,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{color:"white",fontWeight:800,fontSize:20}}>{active.total+"g"}</span>
+        <span style={{color:"white",fontSize:11}}>{aiRes ? (photo ? "IA photo" : "IA") : "local"}{aiRes&&active.confidence ? " - fiabilite "+active.confidence : ""}</span>
       </div>
       <div style={{padding:"10px 12px"}}>
         {active.items&&active.items.map((it,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"1px solid "+C.border,fontSize:12}}><span>{it.name}</span><span style={{fontWeight:700,color:C.blue}}>{it.glucides+"g"}</span></div>)}
+        {active.conseil&&<div style={{marginTop:8,padding:"8px 10px",background:"#f0f9ff",borderRadius:8,fontSize:12,color:C.muted,lineHeight:1.4}}>{active.conseil}</div>}
         <div style={{marginTop:10}}><PBtn onClick={()=>onAccept(active.total)} color={C.green} full small>{"Utiliser "+active.total+"g"}</PBtn></div>
       </div>
     </div>)}
@@ -801,12 +844,16 @@ async function dexcomRefreshAPI(refreshToken){
   if(d.error)throw new Error(d.error);
   return d;
 }
+function dexTrend(t){
+  const m={"flat":"->","fortyfiveup":"/->","singleup":"^","doubleup":"^^","fortyfivedown":"\\->","singledown":"v","doubledown":"vv","none":"","notcomputable":"","rateoutofrange":""};
+  return m[String(t||"").toLowerCase()]||"->";
+}
 function egvsToPoints(egvs){
   return egvs.map(e=>{
     const dt=new Date(e.systemTime||e.displayTime);
     if(isNaN(dt))return null;
     const gl=(parseFloat(e.value)/100).toFixed(2);
-    return{time:dt.toTimeString().slice(0,5),value:gl,ts:dt.toISOString(),trend:e.trend||""};
+    return{time:dt.toTimeString().slice(0,5),value:gl,ts:dt.toISOString(),trend:dexTrend(e.trend)};
   }).filter(Boolean).sort((a,b)=>a.ts.localeCompare(b.ts));
 }
 function groupByDay(points){
