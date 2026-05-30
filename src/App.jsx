@@ -36,6 +36,28 @@ const prevDay=iso=>toISO(new Date(new Date(iso+"T12:00:00").getTime()-86400000))
 const fmtDay=s=>new Date(s+"T12:00:00").toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});
 const fmtShort=s=>{const d=new Date(s+"T12:00:00");return{wd:d.toLocaleDateString("fr-FR",{weekday:"short"}).slice(0,3),day:d.getDate()};};
 const f2b64=f=>new Promise((r,j)=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.onerror=j;fr.readAsDataURL(f);});
+// Compresse une image: redimensionne a max 800px et qualite JPEG 0.75 pour reduire les tokens IA
+const compressImg=(file,maxSize)=>new Promise((resolve,reject)=>{
+  const max=maxSize||800;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      let w=img.width,h=img.height;
+      if(w>h && w>max){h=Math.round(h*max/w);w=max;}
+      else if(h>=w && h>max){w=Math.round(w*max/h);h=max;}
+      const canvas=document.createElement("canvas");
+      canvas.width=w;canvas.height=h;
+      const ctx=canvas.getContext("2d");
+      ctx.drawImage(img,0,0,w,h);
+      resolve(canvas.toDataURL("image/jpeg",0.75));
+    };
+    img.onerror=reject;
+    img.src=e.target.result;
+  };
+  reader.onerror=reject;
+  reader.readAsDataURL(file);
+});
 function glyColor(v,cfg){if(!v)return C.muted;const n=parseFloat(v),mn=(cfg||DEF).tMin,mx=(cfg||DEF).tMax;if(n<0.7)return C.red;if(n>=mn&&n<=mx)return C.green;if(n<=mx+0.3)return C.orange;return C.red;}
 function glyLabel(v,cfg){if(!v)return "";const n=parseFloat(v),mn=(cfg||DEF).tMin,mx=(cfg||DEF).tMax;if(n<0.7)return "Hypo";if(n>=mn&&n<=mx)return "Dans la cible";if(n<mn)return "En dessous";if(n<=mx+0.3)return "Acceptable";return "Au-dessus";}
 
@@ -304,24 +326,47 @@ function Lbl({children}){return <label style={{display:"block",color:C.muted,fon
 function TInput({value,onChange,onBlur,placeholder,type,step,min}){return <input type={type||"text"} value={value} onChange={e=>onChange(e.target.value)} onBlur={onBlur} placeholder={placeholder} step={step} min={min} style={{width:"100%",padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,color:C.text,fontFamily:"inherit",outline:"none",boxSizing:"border-box",background:"white"}}/>;}
 function TTime({value,onChange}){return <input type="time" value={value} onChange={e=>onChange(e.target.value)} style={{padding:"9px 12px",border:"1.5px solid "+C.border,borderRadius:8,fontSize:14,color:C.text,fontFamily:"inherit"}}/>;}
 
-function DayCurve({pts,meals,cfg,width,height}){
-  if(!pts||pts.length<2)return null;
+function DayCurve({pts,meals,cfg,width,height,winStart,winEnd}){
+  if(!pts||pts.length<1)return null;
   const mn=(cfg||DEF).tMin,mx=(cfg||DEF).tMax;
-  const vals=pts.map(p=>parseFloat(p.value));
-  const times=pts.map(p=>{const t=p.time.split(":");return parseInt(t[0])*60+parseInt(t[1]);});
-  const minT=Math.min(...times),maxT=Math.max(...times);
+  // Chaque point a un timestamp absolu (ts) et une heure (time)
+  const toMin=p=>{const d=new Date(p.ts);return d.getTime();};
+  // Fenetre temporelle: winStart/winEnd sont des timestamps absolus (ms)
+  const allTs=pts.map(toMin);
+  const wStart = winStart!==undefined ? winStart : Math.min(...allTs);
+  const wEnd = winEnd!==undefined ? winEnd : Math.max(...allTs);
+  // Filtrer les points dans la fenetre
+  const inWin=pts.map((p,i)=>({p,ts:allTs[i],v:parseFloat(p.value)})).filter(x=>x.ts>=wStart&&x.ts<=wEnd);
+  if(inWin.length<1)return(<div style={{padding:"20px",textAlign:"center",fontSize:12,color:C.muted}}>Aucune donnee sur cette periode</div>);
+  const vals=inWin.map(x=>x.v);
   const minV=0.4,maxV=Math.max(3.2,Math.max(...vals)+0.3);
   const pL=32,pR=8,pT=10,pB=24,W=width-pL-pR,H=height-pT-pB;
-  const tx=t=>pL+((t-minT)/(maxT-minT||1))*W;
+  const span=(wEnd-wStart)||1;
+  const tx=ts=>pL+((ts-wStart)/span)*W;
   const ty=v=>pT+(1-(v-minV)/(maxV-minV))*H;
-  const ptStr=pts.map((_,i)=>tx(times[i])+","+ty(vals[i])).join(" ");
-  const hours=[];for(let h=0;h<=23;h++)if(h*60>=minT&&h*60<=maxT)hours.push(h);
-  const mM=meals ? Object.entries(meals).map(([mid,meal])=>{if(!meal)return null;const t=meal.time.split(":");const mt=parseInt(t[0])*60+parseInt(t[1]);if(mt<minT||mt>maxT)return null;const mDef=MEALS.find(m=>m.id===mid);return{x:tx(mt),col:mDef ? mDef.color : C.orange,lbl:meal.glucides ? meal.glucides+"g" : ""};}).filter(Boolean) : [];
+  const ptStr=inWin.map(x=>tx(x.ts)+","+ty(x.v)).join(" ");
+  // Graduations horaires
+  const hourMarks=[];
+  const startH=new Date(wStart);startH.setMinutes(0,0,0);
+  const spanHours=span/3600000;
+  const step=spanHours<=4 ? 1 : spanHours<=12 ? 2 : 3;
+  for(let t=startH.getTime();t<=wEnd;t+=step*3600000){
+    if(t>=wStart){const d=new Date(t);hourMarks.push({ts:t,label:d.getHours()+"h"});}
+  }
+  // Repas dans la fenetre
+  const mM=meals ? Object.entries(meals).map(([mid,meal])=>{if(!meal||!meal.time)return null;
+    // Reconstruire le ts du repas a partir de la date des points et l heure du repas
+    const ref=new Date(inWin[0].ts);const[mh,mm]=meal.time.split(":").map(Number);
+    const md=new Date(ref);md.setHours(mh,mm,0,0);let mts=md.getTime();
+    if(mts<wStart)mts+=86400000;if(mts>wEnd)mts-=86400000;
+    if(mts<wStart||mts>wEnd)return null;
+    const mDef=MEALS.find(m=>m.id===mid);return{x:tx(mts),col:mDef ? mDef.color : C.orange,lbl:meal.glucides ? meal.glucides+"g" : ""};}).filter(Boolean) : [];
   return(<svg width={width} height={height} style={{display:"block"}}>
     <rect x={pL} y={ty(mx)} width={W} height={Math.abs(ty(mn)-ty(mx))} fill="rgba(22,163,74,0.08)"/>
     {[0.7,mn,mx,2.0].map(v=>(<g key={v}><line x1={pL} y1={ty(v)} x2={pL+W} y2={ty(v)} stroke={v===mn||v===mx ? "#16a34a55" : "#e5e7eb"} strokeWidth={v===mn||v===mx ? "1.5" : "1"} strokeDasharray="3,3"/><text x={pL-4} y={ty(v)+4} textAnchor="end" fontSize="9" fill="#9ca3af">{v}</text></g>))}
-    {hours.filter((_,i)=>i%3===0).map(h=>(<g key={h}><line x1={tx(h*60)} y1={pT+H} x2={tx(h*60)} y2={pT+H+4} stroke="#d1d5db" strokeWidth="1"/><text x={tx(h*60)} y={pT+H+14} textAnchor="middle" fontSize="8" fill="#9ca3af">{h+"h"}</text></g>))}
-    <polyline points={ptStr} fill="none" stroke={C.blue} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+    {hourMarks.map((hm,i)=>(<g key={i}><line x1={tx(hm.ts)} y1={pT+H} x2={tx(hm.ts)} y2={pT+H+4} stroke="#d1d5db" strokeWidth="1"/><text x={tx(hm.ts)} y={pT+H+14} textAnchor="middle" fontSize="8" fill="#9ca3af">{hm.label}</text></g>))}
+    {inWin.length>1&&<polyline points={ptStr} fill="none" stroke={C.blue} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>}
+    {inWin.length===1&&<circle cx={tx(inWin[0].ts)} cy={ty(inWin[0].v)} r="3" fill={C.blue}/>}
     {mM.map((m,i)=>(<g key={"m"+i}><polygon points={m.x+","+(pT+H-2)+" "+(m.x-5)+","+(pT+H-10)+" "+(m.x+5)+","+(pT+H-10)} fill={m.col} opacity="0.8"/>{m.lbl&&<text x={m.x} y={pT+H-12} textAnchor="middle" fontSize="8" fill={m.col}>{m.lbl}</text>}</g>))}
   </svg>);
 }
@@ -348,7 +393,7 @@ function GlucidesAI({initDesc,onAccept,apiKey,photo:mealPhoto}){
         <img src={photo} alt="" style={{width:"100%",maxHeight:180,objectFit:"cover",borderRadius:8,border:"1.5px solid "+C.orange,display:"block",cursor:"pointer"}} onClick={()=>photoRef.current.click()}/>
         <button onClick={()=>setPhoto(null)} style={{position:"absolute",top:6,right:6,background:"rgba(0,0,0,0.6)",color:"white",border:"none",borderRadius:6,padding:"3px 8px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Retirer</button>
       </div>) : (<div onClick={()=>photoRef.current.click()} style={{border:"2px dashed "+C.orange,borderRadius:10,padding:"14px",cursor:"pointer",textAlign:"center",background:"#fffbeb",fontSize:13,color:C.orange,fontWeight:600}}>Prendre / choisir une photo du repas</div>)}
-      <input ref={photoRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{if(e.target.files[0]){setPhoto(await f2b64(e.target.files[0]));setAiRes(null);}}}/>
+      <input ref={photoRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={async e=>{if(e.target.files[0]){setPhoto(await compressImg(e.target.files[0],800));setAiRes(null);}}}/>
     </div>
     {/* Boutons */}
     {photo ? (
@@ -638,15 +683,26 @@ function LibreLive({allData, saveAll, cfg}) {
       Object.keys(byDay).forEach(dk => {
         newDays[dk] = {...(newDays[dk]||{}), dexcomCurve: byDay[dk]};
       });
-      // Determine the most recent reading (current or last in graph)
+      // La valeur "current" de l API est la plus fraiche - on l ajoute a la courbe du jour
       let liveGly = current;
+      if(current && current.value) {
+        const todayKey = TODAY();
+        const curve = newDays[todayKey] && newDays[todayKey].dexcomCurve ? [...newDays[todayKey].dexcomCurve] : [];
+        // Ajouter current s il est plus recent que le dernier point
+        const lastPt = curve.length>0 ? curve[curve.length-1] : null;
+        if(!lastPt || current.value!==lastPt.value || current.time!==lastPt.time) {
+          const now = new Date();
+          curve.push({time:current.time||now.toTimeString().slice(0,5), value:current.value, ts:now.toISOString(), trend:current.trend||"->"});
+          newDays[todayKey] = {...(newDays[todayKey]||{}), dexcomCurve:curve};
+        }
+      }
       if(!liveGly && readings.length>0) {
         const last = readings[readings.length-1];
         liveGly = {value:last.value, trend:last.trend, time:last.time};
       }
       saveAll({...allData, days:newDays, libreCreds:c, liveGly:liveGly?{...liveGly,updatedAt:Date.now()}:null});
       setLastSync(new Date());
-      setStatus({type:"ok", msg:readings.length+" mesures synchronisees"+(current?" - actuelle: "+current.value+" g/L "+current.trend:"")});
+      setStatus({type:"ok", msg:readings.length+" mesures synchronisees"});
     } catch(e) {
       if(e.message==="TOKEN_EXPIRED") {
         setStatus({type:"error", msg:"Session expiree - reconnectez-vous"});
@@ -1261,6 +1317,7 @@ export default function App(){
   const [rFrom,setRFrom]=useState(()=>{const d=new Date();d.setDate(d.getDate()-6);return toISO(d);});
   const [rTo,setRTo]=useState(TODAY());
   const [reportHtml,setReportHtml]=useState(null);
+  const [graphView,setGraphView]=useState("today");
 
   if(!ready)return(<div style={{background:C.bg,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Segoe UI,sans-serif"}}><div style={{textAlign:"center",color:C.muted}}><div style={{fontSize:28,marginBottom:8}}>Chargement...</div></div></div>);
 
@@ -1296,10 +1353,28 @@ export default function App(){
       </div>
       <h2 style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:12,textTransform:"capitalize"}}>{fmtDay(activeDay)}</h2>
       {day.dexcomCurve&&day.dexcomCurve.length>0 ? (<div style={{background:"white",border:"1.5px solid #93c5fd",borderRadius:12,padding:"12px 14px",marginBottom:12}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontWeight:700,fontSize:13,color:C.blue}}>Courbe Dexcom</span><span style={{fontSize:11,color:C.muted}}>{day.dexcomCurve.length+" pts"}</span></div>
-        <DayCurve pts={day.dexcomCurve} meals={day.meals} cfg={cfg} width={340} height={110}/>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}><span style={{fontWeight:700,fontSize:13,color:C.blue}}>{allData.libreCreds ? "Courbe FreeStyle Libre" : allData.dexcomOAuth ? "Courbe Dexcom" : "Courbe glycemie"}</span><span style={{fontSize:11,color:C.muted}}>{day.dexcomCurve.length+" pts"}</span></div>
+        <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
+          {[["today","Aujourd hui"],["full","00h-24h"],["24h","24h glissantes"],["4h","4h glissantes"]].map(([k,l])=><button key={k} onClick={()=>setGraphView(k)} style={{padding:"4px 10px",borderRadius:6,border:"1px solid "+(graphView===k ? C.blue : C.border),background:graphView===k ? C.blue : "white",color:graphView===k ? "white" : C.muted,fontWeight:600,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>)}
+        </div>
+        {(()=>{
+          const now=new Date();
+          const midnight=new Date(now);midnight.setHours(0,0,0,0);
+          let ws,we;
+          if(graphView==="today"){ws=midnight.getTime();we=now.getTime();}
+          else if(graphView==="full"){ws=midnight.getTime();we=midnight.getTime()+86400000;}
+          else if(graphView==="24h"){we=now.getTime();ws=we-86400000;}
+          else {we=now.getTime();ws=we-4*3600000;}
+          // Pour les vues glissantes qui traversent minuit, fusionner hier+aujourd hui
+          let pts=day.dexcomCurve||[];
+          if(graphView==="24h"||graphView==="4h"){
+            const yCurve=(allData.days&&allData.days[yday]&&allData.days[yday].dexcomCurve)||[];
+            pts=[...yCurve,...pts];
+          }
+          return <DayCurve pts={pts} meals={day.meals} cfg={cfg} width={340} height={110} winStart={ws} winEnd={we}/>;
+        })()}
         {(()=>{const vals=day.dexcomCurve.map(p=>parseFloat(p.value));const avg=(vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(2);const tir=Math.round(vals.filter(v=>v>=cfg.tMin&&v<=cfg.tMax).length/vals.length*100);const above=Math.round(vals.filter(v=>v>cfg.tMax).length/vals.length*100);return(<div style={{display:"flex",gap:8,marginTop:8}}>{[["Moyenne",avg+" g/L",C.blue],["Temps cible",tir+"%",tir>=70 ? C.green : C.orange],["Au-dessus",above+"%",above>20 ? C.red : C.green]].map(([l,v,col])=><div key={l} style={{flex:1,textAlign:"center",background:col+"11",borderRadius:8,padding:"5px 4px"}}><div style={{fontSize:10,color:C.muted}}>{l}</div><div style={{fontSize:13,fontWeight:700,color:col}}>{v}</div></div>)}</div>);})()} 
-      </div>) : (<div style={{background:"#eff6ff",border:"1.5px dashed #93c5fd",borderRadius:12,padding:"14px 16px",marginBottom:12,textAlign:"center"}}><div style={{fontSize:13,color:C.blue,fontWeight:600}}>Aucune courbe Dexcom - importez le CSV</div></div>)}
+      </div>) : (<div style={{background:"#eff6ff",border:"1.5px dashed #93c5fd",borderRadius:12,padding:"14px 16px",marginBottom:12,textAlign:"center"}}><div style={{fontSize:13,color:C.blue,fontWeight:600}}>Aucune courbe - connectez un capteur dans Parametres</div></div>)}
       <AdaptiveBanner allData={allData} cfg={cfg} onApply={nc=>saveAll({...allData,cfg:nc})}/>
       <AnalysePanel dayData={ydayData} dayLabel={fmtDay(yday)} cfg={cfg} apiKey={apiKey}/>
       {MEALS.map(m=>{const onSave=data=>{const nm={...day.meals||{}};nm[m.id]=data;upDay({meals:nm});};const onDel=()=>{const ms={...day.meals||{}};delete ms[m.id];upDay({meals:ms});};return <MealBlock key={m.id} meal={m} saved={(day.meals&&day.meals[m.id])||null} onSave={onSave} onDelete={onDel} cfg={cfg} curve={day.dexcomCurve||null} apiKey={apiKey}/>;  })}
