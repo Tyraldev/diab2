@@ -161,6 +161,55 @@ async function handleLibre(action, body, res) {
   return res.status(400).json({ error: "Unknown libre action: "+action });
 }
 
+// PROXY IA: appelle l API Anthropic avec la cle stockee cote serveur (variable d env)
+// Evite d exposer la cle dans le navigateur des utilisateurs.
+function anthropicCall(payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) { reject(new Error("ANTHROPIC_API_KEY non configuree sur le serveur")); return; }
+    const req = https.request({
+      hostname: "api.anthropic.com",
+      path: "/v1/messages",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(data),
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01"
+      }
+    }, res => {
+      let raw = "";
+      res.on("data", c => raw += c);
+      res.on("end", () => {
+        try { resolve({ status: res.statusCode, data: JSON.parse(raw) }); }
+        catch(e) { resolve({ status: res.statusCode, data: raw }); }
+      });
+    });
+    req.on("error", reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+async function handleAI(body, res) {
+  // Le front envoie messages + max_tokens; on relaie a Anthropic avec notre cle
+  const messages = body.messages;
+  const maxTokens = body.max_tokens || 1500;
+  const model = body.model || "claude-sonnet-4-5";
+  if (!messages) return res.status(400).json({ error: "messages requis" });
+  try {
+    const r = await anthropicCall({ model, max_tokens: maxTokens, messages });
+    if (r.status !== 200) {
+      const msg = (r.data && r.data.error && r.data.error.message) || JSON.stringify(r.data).slice(0,200);
+      return res.status(r.status).json({ error: "Anthropic API " + r.status + ": " + msg });
+    }
+    return res.status(200).json(r.data);
+  } catch(e) {
+    return res.status(500).json({ error: e.message });
+  }
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -173,6 +222,10 @@ module.exports = async function handler(req, res) {
   const { action, code, accessToken, refreshToken } = body;
 
   try {
+    // Proxy IA (cle cote serveur)
+    if (action === "ai") {
+      return handleAI(body, res);
+    }
     // Route LibreView actions
     if (action && action.indexOf("libre_") === 0) {
       return handleLibre(action, body, res);
