@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 
 const SK = "diabete-v5";
-const VERSION = "v3.7";
+const VERSION = "v3.8";
 const DEF = { tMin:0.9, tMax:1.8, ratioIC:10, fc:0.5, ciblePre:1.2, lenteHab:"", lenteHeure:"22:00", lenteNom:"" };
 const MEALS = [
   { id:"breakfast", label:"Petit-dejeuner", tag:"Matin",  color:"#d97706" },
@@ -436,8 +436,8 @@ function GlucidesAI({initDesc,onAccept,apiKey,photo:mealPhoto}){
   const [photo,setPhoto]=useState(mealPhoto||null);
   const photoRef=useRef();
   const estimate=()=>{if(!desc.trim())return;setErr(null);setAiRes(null);const r=estimateCarbsLocal(desc);if(!r.found){setRes({total:0,items:[],found:false});setErr("Aucun aliment reconnu. Essayez: pain, pates, riz, banane...");return;}setRes(r);};
-  const enhance=async()=>{if(!apiKey){setErr("Cle API manquante. Ajoutez-la dans Parametres.");return;}setLoading(true);setErr(null);try{const r=await aiGlucides(desc,apiKey);setAiRes(r);}catch(e){setErr("IA indisponible ("+e.message+").");}finally{setLoading(false);}};
-  const analysePhoto=async()=>{if(!apiKey){setErr("Cle API manquante. Ajoutez-la dans Parametres.");return;}if(!photo){setErr("Ajoutez d abord une photo du repas.");return;}setLoading(true);setErr(null);try{const r=await aiGlucidesPhoto(photo,desc,apiKey);setAiRes(r);}catch(e){setErr("Analyse photo impossible ("+e.message+").");}finally{setLoading(false);}};
+  const enhance=async()=>{setLoading(true);setErr(null);try{const r=await aiGlucides(desc,apiKey);setAiRes(r);}catch(e){setErr("IA indisponible ("+e.message+").");}finally{setLoading(false);}};
+  const analysePhoto=async()=>{if(!photo){setErr("Ajoutez d abord une photo du repas.");return;}setLoading(true);setErr(null);try{const r=await aiGlucidesPhoto(photo,desc,apiKey);setAiRes(r);}catch(e){setErr("Analyse photo impossible ("+e.message+").");}finally{setLoading(false);}};
   const active=aiRes||res;
   const confColor=c=>c==="haute" ? C.green : c==="faible" ? C.red : C.orange;
   return(<div style={{background:"#fff7ed",border:"1.5px solid "+C.orange,borderRadius:12,padding:16,marginTop:10}}>
